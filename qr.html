@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Seth M.R. Jaipuria School – Class 12 Farewell After Party</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap" rel="stylesheet">
+
+  <!-- Font Awesome -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <style>
+    body {
+      font-family: 'Rajdhani', sans-serif;
+      background-color: #050505;
+      color: #e5e7eb;
+      overflow-x: hidden;
+    }
+    h1, h2, h3 { font-family: 'Orbitron', sans-serif; }
+    .neon-text { text-shadow: 0 0 6px #ff00de, 0 0 18px #ff00de; }
+    .glass { background: rgba(20,20,20,0.7); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); }
+    .neon-btn { background: linear-gradient(90deg,#ff00de,#8b5cf6); box-shadow: 0 0 18px #8b5cf6; }
+    .neon-btn:hover { box-shadow: 0 0 30px #ff00de; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center pb-16">
+
+  <!-- Background Glow -->
+  <div class="fixed inset-0 -z-10">
+    <div class="absolute -top-32 -left-32 w-96 h-96 bg-purple-800 rounded-full blur-[140px] opacity-30"></div>
+    <div class="absolute bottom-0 right-0 w-96 h-96 bg-blue-800 rounded-full blur-[140px] opacity-30"></div>
+  </div>
+
+  <!-- Header -->
+  <header class="text-center mt-10 px-4">
+    <img src="cropped-fav.png" alt="School Logo" class="w-24 h-24 mx-auto mb-4" />
+    <h3 class="text-cyan-400 tracking-widest text-sm uppercase">Seth M.R. Jaipuria School, Shahjahanpur</h3>
+    <h1 class="text-5xl font-black neon-text mt-3">Encore After Party</h1>
+    <p class="text-gray-400 mt-2">Class of 2025–26 · One Last Night</p>
+  </header>
+
+  <!-- Event Card -->
+  <section class="glass max-w-md w-full mt-10 p-6 rounded-2xl space-y-4">
+    <div class="flex gap-4 items-start">
+      <i class="fas fa-calendar text-pink-500 text-xl"></i>
+      <div>
+        <p class="text-sm text-gray-400">Date & Time</p>
+        <p class="text-lg font-bold">1 February 2026 · 5:00 PM Sharp</p>
+      </div>
+    </div>
+    <div class="flex gap-4 items-start">
+      <i class="fas fa-map-marker-alt text-cyan-400 text-xl"></i>
+      <div>
+        <p class="text-sm text-gray-400">Venue</p>
+        <p class="text-lg font-bold">Saras Elysium, 2nd Floor<br/>The Grand Arc Hotel & Convention Centre</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Info Section -->
+  <section class="glass max-w-md w-full mt-6 p-6 rounded-2xl text-center">
+    <p class="text-gray-300">Dinner · Live Music · Dance Floor</p>
+    <p class="text-pink-400 font-bold mt-2">Be There or Be Square</p>
+  </section>
+
+  <!-- RSVP Disabled Note -->
+  <section class="max-w-md w-full mt-6 p-5 border border-dashed border-gray-700 rounded-xl text-center text-gray-400 text-sm">
+    RSVP system removed for free hosting reliability.<br />
+    Share this link and poster for entry details.
+  </section>
+
+  <!-- Footer -->
+  <footer class="mt-12 text-center text-xs text-gray-600">
+    Heaven Eleven Productions · Jaipurians
+  </footer>
+
+</body>
+</html>
