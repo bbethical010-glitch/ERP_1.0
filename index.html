@@ -1,54 +1,75 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Encore After Party – Entry System</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Encore Organizer Hub</title>
 
 <script src="https://cdn.tailwindcss.com"></script>
-<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Rajdhani:wght@400;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
 
 <style>
 body {
-  font-family: 'Rajdhani', sans-serif;
-  background: url("https://www.thegrandarc.com/images/grand-banner.jpg") center/cover no-repeat fixed;
+  font-family: 'Montserrat', sans-serif;
+  background: #050510;
 }
-.overlay {
-  background: rgba(0,0,0,0.85);
-  min-height: 100vh;
+h1,h2 { font-family: 'Orbitron', sans-serif; }
+.glass {
+  background: rgba(20,20,40,0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.15);
 }
-h1,h2,h3 { font-family: 'Orbitron', sans-serif; }
 </style>
 </head>
 
 <body>
-<div id="passwordGate" class="overlay flex items-center justify-center">
-  <div class="bg-black p-6 rounded-xl border border-gray-700 text-center w-80">
-    <h2 class="text-white mb-4">Organizer Access</h2>
-    <input id="pw" type="password" placeholder="Enter password"
-      class="w-full p-3 rounded bg-gray-900 text-white mb-4">
-    <button onclick="unlock()" class="w-full bg-green-500 text-black font-bold py-2 rounded">
-      Unlock
+
+<!-- PASSWORD GATE -->
+<div id="login" class="min-h-screen flex items-center justify-center">
+  <div class="glass p-6 rounded-xl w-80 text-center">
+    <h2 class="text-white mb-4">Organizer Login</h2>
+    <input id="pw" type="password" placeholder="Password"
+      class="w-full p-3 mb-4 rounded bg-black text-white">
+    <button onclick="unlock()" class="w-full bg-pink-500 text-black font-bold py-2 rounded">
+      Enter Hub
     </button>
   </div>
 </div>
 
-<div id="app" class="overlay hidden flex flex-col items-center p-6">
+<!-- MAIN HUB -->
+<div id="hub" class="hidden min-h-screen p-6 flex flex-col items-center">
 
-<h1 class="text-white text-3xl mb-6">Encore Entry Verification</h1>
+<h1 class="text-white text-3xl mb-6">Encore Organizer Hub</h1>
 
-<div class="bg-black p-6 rounded-xl w-full max-w-sm border border-gray-700">
-  <p class="text-gray-400 mb-3 text-sm">Organizer use only · Payment required</p>
-
-  <input id="entryId" placeholder="JAI-0XX"
-    class="w-full p-3 text-center text-lg uppercase rounded bg-gray-900 text-white mb-4">
-
-  <button id="verifyBtn"
-    class="w-full bg-pink-500 text-black font-bold py-3 rounded">
-    VERIFY ENTRY
+<!-- SEARCH -->
+<div class="glass p-6 rounded-xl w-full max-w-md mb-6">
+  <input id="entryId" placeholder="Enter ID (JAI-0XX)"
+    class="w-full p-3 text-center text-lg uppercase rounded bg-black text-white mb-4">
+  <button id="fetchBtn"
+    class="w-full bg-cyan-400 text-black font-bold py-2 rounded">
+    Fetch Guest
   </button>
+</div>
 
-  <div id="result" class="mt-4 text-xl font-bold text-center"></div>
+<!-- RESULT -->
+<div id="card" class="glass p-6 rounded-xl w-full max-w-md hidden text-white">
+  <p><strong>Name:</strong> <span id="name"></span></p>
+  <p><strong>ID:</strong> <span id="gid"></span></p>
+  <p><strong>Payment:</strong> <span id="paid"></span></p>
+  <p><strong>Entry:</strong> <span id="used"></span></p>
+
+  <div class="flex gap-3 mt-4">
+    <button id="togglePay"
+      class="flex-1 bg-yellow-400 text-black font-bold py-2 rounded">
+      Toggle Payment
+    </button>
+    <button id="verify"
+      class="flex-1 bg-green-400 text-black font-bold py-2 rounded">
+      Verify Entry
+    </button>
+  </div>
+
+  <p id="msg" class="mt-4 text-center text-lg"></p>
 </div>
 
 </div>
@@ -59,7 +80,7 @@ import {
   getFirestore, doc, getDoc, updateDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
-/* 🔴 REPLACE WITH YOUR CONFIG */
+/* 🔴 REPLACE CONFIG */
 const firebaseConfig = {
   apiKey: "AIzaSyBoMIeT_axIVSyyhBC8PRzcO9z0bhIIyXA",
   authDomain: "encore-entry-system.firebaseapp.com",
@@ -69,62 +90,65 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const btn = document.getElementById("verifyBtn");
-const result = document.getElementById("result");
+let currentRef, currentData;
 
-btn.onclick = async () => {
-  const id = document.getElementById("entryId").value.trim().toUpperCase();
+document.getElementById("fetchBtn").onclick = async () => {
+  const id = entryId.value.trim().toUpperCase();
   if (!id) return;
 
-  btn.disabled = true;
-  result.textContent = "Checking…";
-  result.className = "text-yellow-400";
+  const ref = doc(db, "guest_list", id);
+  const snap = await getDoc(ref);
 
-  try {
-    const ref = doc(db, "guest_list", id);
-    const snap = await getDoc(ref);
-
-    if (!snap.exists()) {
-      result.textContent = "❌ ID NOT FOUND";
-      result.className = "text-red-500";
-    } else {
-      const data = snap.data();
-
-      if (data.checkedIn) {
-        result.textContent = "🚫 ALREADY USED";
-        result.className = "text-red-500";
-      } else if (!data.paid) {
-        result.textContent = "💰 PAYMENT PENDING";
-        result.className = "text-orange-400";
-      } else {
-        await updateDoc(ref, {
-          checkedIn: true,
-          checkedInAt: serverTimestamp()
-        });
-        result.textContent = "✅ ENTRY APPROVED";
-        result.className = "text-green-400 text-2xl";
-      }
-    }
-  } catch (e) {
-    result.textContent = "⚠️ SYSTEM ERROR";
-    result.className = "text-red-400";
+  if (!snap.exists()) {
+    alert("ID not found");
+    return;
   }
 
-  btn.disabled = false;
-  document.getElementById("entryId").value = "";
+  currentRef = ref;
+  currentData = snap.data();
+
+  card.classList.remove("hidden");
+  name.innerText = currentData.name;
+  gid.innerText = id;
+  paid.innerText = currentData.paid ? "PAID" : "NOT PAID";
+  used.innerText = currentData.checkedIn ? "USED" : "NOT USED";
 };
+
+togglePay.onclick = async () => {
+  await updateDoc(currentRef, { paid: !currentData.paid });
+  currentData.paid = !currentData.paid;
+  paid.innerText = currentData.paid ? "PAID" : "NOT PAID";
+};
+
+verify.onclick = async () => {
+  if (currentData.checkedIn) {
+    msg.innerText = "Already Used";
+    msg.className = "text-red-400";
+    return;
+  }
+  if (!currentData.paid) {
+    msg.innerText = "Payment Pending";
+    msg.className = "text-yellow-400";
+    return;
+  }
+  await updateDoc(currentRef, {
+    checkedIn: true,
+    checkedInAt: serverTimestamp()
+  });
+  used.innerText = "USED";
+  msg.innerText = "ENTRY APPROVED";
+  msg.className = "text-green-400 text-xl";
+};
+
 </script>
 
 <script>
-const PASSWORD = "encore2026"; // change this
-
+const PASSWORD = "ENCORE2026";
 function unlock() {
-  if (document.getElementById("pw").value === PASSWORD) {
-    document.getElementById("passwordGate").classList.add("hidden");
-    document.getElementById("app").classList.remove("hidden");
-  } else {
-    alert("Wrong password");
-  }
+  if (pw.value === PASSWORD) {
+    login.classList.add("hidden");
+    hub.classList.remove("hidden");
+  } else alert("Wrong password");
 }
 </script>
 
