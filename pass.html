@@ -72,9 +72,10 @@ h1,h2,h3 { font-family: 'Orbitron', sans-serif; }
 <!-- RESULT -->
 <div id="resultCard" class="glass max-w-md w-full p-6 rounded-2xl hidden text-center">
   <h3 id="resTitle" class="text-2xl mb-2"></h3>
-  <p id="resName" class="text-cyan-300 font-semibold"></p>
-  <p id="resId" class="text-cyan-300 font-semibold mb-2"></p>
-  <p id="resStatus" class="text-gray-200 mb-4"></p>
+  <p id="resName"></p>
+  <p id="resId" class="mb-2"></p>
+  <p id="resStatus" class="mb-4"></p>
+
   <button id="pdfBtn"
     class="bg-green-400 text-black font-bold px-6 py-3 rounded hidden">
     Download Digital Pass
@@ -108,6 +109,45 @@ const card = document.getElementById("resultCard");
 const pdfBtn = document.getElementById("pdfBtn");
 
 let currentName = "", currentId = "";
+
+btn.onclick = async () => {
+  const id = entryId.value.trim().toUpperCase();
+  if (!id) return;
+
+  const ref = doc(db, "guest_list", id);
+  const snap = await getDoc(ref);
+
+  card.classList.remove("hidden");
+  pdfBtn.classList.add("hidden");
+
+  if (!snap.exists()) {
+    show("❌ Invalid Pass", "", "", "ID not found", false);
+    return;
+  }
+
+  const d = snap.data();
+  currentName = d.name;
+  currentId = id;
+
+  document.getElementById("resName").innerText = d.name;
+  document.getElementById("resId").innerText = id;
+
+  if (d.checkedIn) {
+    show("🚫 Already Used", "", "", "This pass has been used", false);
+  } else if (!d.paid) {
+    show("💰 Payment Pending", "", "", "Please contact organizer", false);
+  } else {
+    show("🎉 Pass Active", "", "", "Show this at entry", true);
+    confetti();
+    pdfBtn.classList.remove("hidden");
+  }
+};
+
+function show(title, n, i, status, ok) {
+  resTitle.innerText = title;
+  resStatus.innerText = status;
+  resTitle.className = ok ? "text-green-400 text-2xl" : "text-red-400 text-2xl";
+}
 
 pdfBtn.onclick = () => {
   const { jsPDF } = window.jspdf;
@@ -195,58 +235,6 @@ pdfBtn.onclick = () => {
   doc.save("Encore_Digital_Pass.pdf");
 };
 
-
-  if (!snap.exists()) {
-    show("❌ Invalid Pass", "", "", "ID not found", false);
-    return;
-  }
-
-  const d = snap.data();
-  currentName = d.name;
-  currentId = id;
-
-  document.getElementById("resName").innerText = d.name;
-  document.getElementById("resId").innerText = id;
-
-  if (d.checkedIn) {
-    show("🚫 Already Used", "", "", "This pass has been used", false);
-  } else if (!d.paid) {
-    show("💰 Payment Pending", "", "", "Please contact organizer", false);
-  } else {
-    show("🎉 Pass Active", "", "", "Show this at entry", true);
-    confetti();
-    pdfBtn.classList.remove("hidden");
-  }
-};
-
-function show(title, n, i, status, ok) {
-  resTitle.innerText = title;
-  resStatus.innerText = status;
-  resTitle.className = ok ? "text-green-400 text-2xl" : "text-red-400 text-2xl";
-}
-
-pdfBtn.onclick = () => {
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-
-  doc.setFillColor(20,20,20);
-  doc.rect(0,0,210,297,'F');
-
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(22);
-  doc.text("Encore After Party", 105, 30, { align: "center" });
-
-  doc.setFontSize(14);
-  doc.text(`Name: ${currentName}`, 20, 60);
-  doc.text(`Pass ID: ${currentId}`, 20, 75);
-  doc.text("Date: 1 Feb 2026 · 5:00 PM", 20, 95);
-  doc.text("Venue: The Grand Arc Hotel", 20, 110);
-
-  doc.setFontSize(12);
-  doc.text("“One night. One memory. One legacy.”", 105, 150, { align: "center" });
-
-  doc.save(`Encore_Pass_${currentId}.pdf`);
-};
 </script>
 
 <script>
