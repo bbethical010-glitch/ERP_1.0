@@ -109,15 +109,92 @@ const pdfBtn = document.getElementById("pdfBtn");
 
 let currentName = "", currentId = "";
 
-btn.onclick = async () => {
-  const id = entryId.value.trim().toUpperCase();
-  if (!id) return;
+pdfBtn.onclick = () => {
+  const { jsPDF } = window.jspdf;
 
-  const ref = doc(db, "guest_list", id);
-  const snap = await getDoc(ref);
+  // Landscape A4
+  const doc = new jsPDF("landscape", "mm", "a4");
 
-  card.classList.remove("hidden");
-  pdfBtn.classList.add("hidden");
+  // COLORS
+  const BLACK = "#000000";
+  const YELLOW = "#FFC65A";
+  const PINK = "#FF2EA6";
+  const CYAN = "#2EE8FF";
+  const WHITE = "#FFFFFF";
+
+  // BACKGROUND
+  doc.setFillColor(BLACK);
+  doc.rect(0, 0, 297, 210, "F");
+
+  // HEADER BLOCK
+  doc.setFillColor(YELLOW);
+  doc.rect(10, 10, 277, 40, "F");
+
+  // LOGO (adjust path if needed)
+  const logo = document.querySelector("img")?.src;
+  if (logo) doc.addImage(logo, "PNG", 15, 15, 30, 30);
+
+  // TITLE
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(BLACK);
+  doc.setFontSize(28);
+  doc.text("ENCORE AFTER PARTY", 55, 30);
+
+  doc.setFontSize(14);
+  doc.text("Class of 2025–26", 55, 40);
+
+  // DATE & TIME BLOCK
+  doc.setFillColor(CYAN);
+  doc.rect(10, 60, 130, 40, "F");
+
+  doc.setTextColor(BLACK);
+  doc.setFontSize(22);
+  doc.text("01.02.2026", 15, 80);
+  doc.text("05:00 PM", 15, 95);
+
+  // VENUE BLOCK
+  doc.setFillColor(PINK);
+  doc.rect(150, 60, 137, 40, "F");
+
+  doc.setTextColor(WHITE);
+  doc.setFontSize(16);
+  doc.text("THE GRAND ARC HOTEL", 155, 80);
+  doc.text("& CONVENTION CENTRE", 155, 92);
+
+  // NAME / ID STRIP
+  doc.setFillColor("#111111");
+  doc.rect(10, 110, 277, 30, "F");
+
+  doc.setTextColor(WHITE);
+  doc.setFontSize(18);
+  doc.text(`NAME: ${resName.innerText.replace("Name: ", "")}`, 20, 130);
+  doc.text(`ID: ${resId.innerText.replace("ID: ", "")}`, 200, 130);
+
+  // ENTRY INFO
+  doc.setFontSize(14);
+  doc.setTextColor(CYAN);
+  doc.text("SCAN AT THE ENTRY GATE", 20, 160);
+
+  // QR PLACEHOLDER
+  doc.setDrawColor(WHITE);
+  doc.rect(230, 145, 40, 40);
+
+  doc.setFontSize(10);
+  doc.text("ENTRY QR", 240, 190);
+
+  // FOOTER QUOTE
+  doc.setFontSize(12);
+  doc.setTextColor("#AAAAAA");
+  doc.text(
+    "Invite-Only · One-Time Entry · Party Hard, Party Smart",
+    148,
+    200,
+    { align: "center" }
+  );
+
+  doc.save("Encore_Digital_Pass.pdf");
+};
+
 
   if (!snap.exists()) {
     show("❌ Invalid Pass", "", "", "ID not found", false);
