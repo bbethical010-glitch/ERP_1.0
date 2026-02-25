@@ -11,6 +11,7 @@ import { TrialBalancePage } from '../pages/TrialBalancePage';
 import { ProfitLossPage } from '../pages/ProfitLossPage';
 import { BalanceSheetPage } from '../pages/BalanceSheetPage';
 import { LoginPage } from '../pages/LoginPage';
+import { UsersPage } from '../pages/UsersPage';
 
 export const router = createHashRouter([
   {
@@ -32,6 +33,7 @@ export const router = createHashRouter([
       { path: 'vouchers/:voucherId/edit', element: <VoucherEditPage /> },
       { path: 'ledger', element: <LedgerPage /> },
       { path: 'daybook', element: <DaybookPage /> },
+      { path: 'users', element: <UsersPage /> },
       { path: 'reports/trial-balance', element: <TrialBalancePage /> },
       { path: 'reports/profit-loss', element: <ProfitLossPage /> },
       { path: 'reports/balance-sheet', element: <BalanceSheetPage /> },

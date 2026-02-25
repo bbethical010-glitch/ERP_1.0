@@ -7,7 +7,8 @@ export function AppShell() {
 
   useGlobalShortcuts({
     onCreate: () => navigate('/vouchers/new'),
-    onBack: () => navigate('/gateway')
+    onBack: () => navigate('/gateway'),
+    onUsers: () => navigate('/users')
   });
 
   return (

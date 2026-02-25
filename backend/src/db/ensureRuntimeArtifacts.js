@@ -1,16 +1,69 @@
 import { pool } from './pool.js';
+import { env } from '../config/env.js';
+import { hashPassword } from '../utils/password.js';
+
+const DEFAULT_BUSINESS_ID = '00000000-0000-0000-0000-000000000001';
+
+function normalizeUsername(username) {
+  return String(username || '')
+    .trim()
+    .toLowerCase();
+}
 
 export async function ensureRuntimeArtifacts() {
   await pool.query(`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`);
   await pool.query(`
     DO $$
     BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'voucher_type') THEN
+        CREATE TYPE voucher_type AS ENUM ('JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE', 'CONTRA');
+      END IF;
+
       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'voucher_status') THEN
         CREATE TYPE voucher_status AS ENUM ('DRAFT', 'POSTED', 'CANCELLED', 'REVERSED');
       END IF;
     END $$;
   `);
   await pool.query(`ALTER TYPE voucher_type ADD VALUE IF NOT EXISTS 'CONTRA'`);
+  await pool.query(
+    `INSERT INTO businesses (id, name, base_currency)
+     VALUES ($1, 'Demo Trading Co.', 'INR')
+     ON CONFLICT (id) DO NOTHING`,
+    [DEFAULT_BUSINESS_ID]
+  );
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app_users (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+      username TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('OWNER', 'MANAGER', 'ACCOUNTANT', 'VIEWER')),
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_by TEXT,
+      last_login_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (business_id, username)
+    )
+  `);
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_app_users_business_active_username ON app_users (business_id, is_active, username)`
+  );
+  await pool.query(
+    `INSERT INTO app_users (
+       business_id, username, display_name, password_hash, role, is_active, created_by
+     ) VALUES ($1, $2, $3, $4, 'OWNER', TRUE, 'SYSTEM')
+     ON CONFLICT (business_id, username)
+     DO UPDATE SET
+       display_name = EXCLUDED.display_name,
+       password_hash = EXCLUDED.password_hash,
+       role = 'OWNER',
+       is_active = TRUE,
+       updated_at = NOW()`,
+    [DEFAULT_BUSINESS_ID, normalizeUsername(env.adminUsername), env.adminDisplayName, hashPassword(env.adminPassword)]
+  );
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS audit_logs (

@@ -18,6 +18,12 @@ export function useGlobalShortcuts(handlers) {
         handlers.onCreate();
       }
 
+      const usersPressed = !typing && event.altKey && key === 'u';
+      if (usersPressed && handlers.onUsers) {
+        event.preventDefault();
+        handlers.onUsers();
+      }
+
       if (!typing && event.key === 'Escape' && handlers.onBack) {
         event.preventDefault();
         handlers.onBack();
