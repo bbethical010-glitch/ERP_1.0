@@ -4,14 +4,19 @@ import { httpError } from '../../utils/httpError.js';
 
 export const ledgerRouter = Router();
 
+function getBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
+
 ledgerRouter.get('/:accountId', async (req, res, next) => {
   try {
     const { accountId } = req.params;
-    const { businessId, from, to } = req.query;
-
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const { from, to } = req.query;
+    const businessId = getBusinessId(req);
 
     const openingRes = await pool.query(
       `SELECT

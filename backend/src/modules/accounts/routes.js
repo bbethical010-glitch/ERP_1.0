@@ -6,7 +6,6 @@ import { httpError } from '../../utils/httpError.js';
 export const accountsRouter = Router();
 
 const createAccountSchema = z.object({
-  businessId: z.string().uuid(),
   accountGroupId: z.string().uuid(),
   code: z.string().min(1),
   name: z.string().min(1),
@@ -15,16 +14,19 @@ const createAccountSchema = z.object({
   openingBalanceType: z.enum(['DR', 'CR']).optional().default('DR')
 });
 
-const bootstrapSchema = z.object({
-  businessId: z.string().uuid()
-});
+const bootstrapSchema = z.object({});
+
+function getBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
 
 accountsRouter.get('/groups', async (req, res, next) => {
   try {
-    const businessId = req.query.businessId;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const businessId = getBusinessId(req);
 
     const result = await pool.query(
       `SELECT id, name, code, category, parent_group_id AS "parentGroupId"
@@ -41,7 +43,8 @@ accountsRouter.get('/groups', async (req, res, next) => {
 
 accountsRouter.post('/groups/bootstrap', async (req, res, next) => {
   try {
-    const { businessId } = bootstrapSchema.parse(req.body);
+    bootstrapSchema.parse(req.body || {});
+    const businessId = getBusinessId(req);
     await pool.query(
       `INSERT INTO account_groups (business_id, name, code, category, is_system)
        VALUES
@@ -65,10 +68,7 @@ accountsRouter.post('/groups/bootstrap', async (req, res, next) => {
 
 accountsRouter.get('/', async (req, res, next) => {
   try {
-    const businessId = req.query.businessId;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const businessId = getBusinessId(req);
 
     const result = await pool.query(
       `SELECT a.id, a.code, a.name, a.normal_balance AS "normalBalance",
@@ -90,13 +90,14 @@ accountsRouter.get('/', async (req, res, next) => {
 accountsRouter.post('/', async (req, res, next) => {
   try {
     const payload = createAccountSchema.parse(req.body);
+    const businessId = getBusinessId(req);
 
     const result = await pool.query(
       `INSERT INTO accounts (business_id, account_group_id, code, name, normal_balance, opening_balance, opening_balance_type)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
       [
-        payload.businessId,
+        businessId,
         payload.accountGroupId,
         payload.code,
         payload.name,

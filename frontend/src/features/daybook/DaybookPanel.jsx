@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID, VOUCHER_STATUSES, VOUCHER_TYPES } from '../../lib/constants';
+import { VOUCHER_STATUSES, VOUCHER_TYPES } from '../../lib/constants';
+import { useAuth } from '../../auth/AuthContext';
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 export function DaybookPanel() {
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
@@ -15,9 +18,10 @@ export function DaybookPanel() {
   const [status, setStatus] = useState('');
 
   const { data = [] } = useQuery({
-    queryKey: ['daybook', { from, to, voucherType, status }],
+    queryKey: ['daybook', businessId, { from, to, voucherType, status }],
+    enabled: Boolean(businessId),
     queryFn: () => {
-      const q = new URLSearchParams({ businessId: DEMO_BUSINESS_ID, from, to });
+      const q = new URLSearchParams({ from, to });
       if (voucherType) q.set('voucherType', voucherType);
       if (status) q.set('status', status);
       return api.get(`/daybook?${q.toString()}`);

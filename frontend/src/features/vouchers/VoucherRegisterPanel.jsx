@@ -2,8 +2,9 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID, VOUCHER_STATUSES, VOUCHER_TYPES } from '../../lib/constants';
+import { VOUCHER_STATUSES, VOUCHER_TYPES } from '../../lib/constants';
 import { usePageKeydown } from '../../hooks/usePageKeydown';
+import { useAuth } from '../../auth/AuthContext';
 
 function formatDate(value) {
   return new Date(value).toLocaleDateString('en-IN', {
@@ -19,6 +20,8 @@ function formatAmount(value) {
 
 export function VoucherRegisterPanel() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const [search, setSearch] = useState('');
   const [voucherType, setVoucherType] = useState('');
   const [status, setStatus] = useState('');
@@ -31,10 +34,10 @@ export function VoucherRegisterPanel() {
   const offset = (page - 1) * limit;
 
   const { data, isLoading } = useQuery({
-    queryKey: ['vouchers', { search, voucherType, status, from, to, limit, offset }],
+    queryKey: ['vouchers', businessId, { search, voucherType, status, from, to, limit, offset }],
+    enabled: Boolean(businessId),
     queryFn: () => {
       const query = new URLSearchParams({
-        businessId: DEMO_BUSINESS_ID,
         limit: String(limit),
         offset: String(offset)
       });

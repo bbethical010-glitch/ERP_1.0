@@ -17,11 +17,18 @@ const loginSchema = z.object({
 });
 
 const userCreateSchema = z.object({
-  businessId: z.string().uuid().optional(),
   username: z.string().min(3).max(50),
   displayName: z.string().min(2).max(100),
   password: z.string().min(6).max(128),
   role: z.enum(USER_ROLES).default('ACCOUNTANT')
+});
+
+const signupSchema = z.object({
+  companyName: z.string().min(2).max(120),
+  username: z.string().min(3).max(50),
+  displayName: z.string().min(2).max(100),
+  password: z.string().min(6).max(128),
+  baseCurrency: z.string().length(3).optional().default('INR')
 });
 
 const registerSchema = userCreateSchema.extend({
@@ -40,14 +47,62 @@ function normalizeUsername(username) {
     .toLowerCase();
 }
 
-function getRequestBusinessId(req, explicitBusinessId) {
-  return explicitBusinessId || req.user?.businessId || DEFAULT_BUSINESS_ID;
-}
-
 function requireOwner(req) {
   if (req.user?.role !== 'OWNER') {
     throw httpError(403, 'Only owner users can manage users');
   }
+}
+
+function getAuthBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
+
+async function bootstrapBusinessDefaults(client, businessId) {
+  await client.query(
+    `INSERT INTO account_groups (business_id, name, code, category, is_system)
+     VALUES
+      ($1, 'Current Assets', 'CA', 'CURRENT_ASSET', TRUE),
+      ($1, 'Fixed Assets', 'FA', 'FIXED_ASSET', TRUE),
+      ($1, 'Liabilities', 'LI', 'LIABILITY', TRUE),
+      ($1, 'Income', 'IN', 'INCOME', TRUE),
+      ($1, 'Expenses', 'EX', 'EXPENSE', TRUE),
+      ($1, 'Capital', 'EQ', 'EQUITY', TRUE)
+     ON CONFLICT (business_id, code) DO NOTHING`,
+    [businessId]
+  );
+
+  await client.query(
+    `INSERT INTO account_groups (business_id, name, code, category, parent_group_id, is_system)
+     VALUES
+      ($1, 'Bank Accounts', 'CA-BANK', 'CURRENT_ASSET', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA'), TRUE),
+      ($1, 'Cash-in-Hand', 'CA-CASH', 'CURRENT_ASSET', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA'), TRUE),
+      ($1, 'Sundry Debtors', 'CA-AR', 'CURRENT_ASSET', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA'), TRUE),
+      ($1, 'Sundry Creditors', 'LI-AP', 'LIABILITY', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'LI'), TRUE),
+      ($1, 'Sales Accounts', 'IN-SALES', 'INCOME', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'IN'), TRUE),
+      ($1, 'Purchase Accounts', 'EX-PUR', 'EXPENSE', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EX'), TRUE),
+      ($1, 'Indirect Expenses', 'EX-IND', 'EXPENSE', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EX'), TRUE)
+     ON CONFLICT (business_id, code) DO NOTHING`,
+    [businessId]
+  );
+
+  await client.query(
+    `INSERT INTO accounts (business_id, account_group_id, code, name, normal_balance, opening_balance, opening_balance_type, is_system)
+     VALUES
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA-CASH'), 'A-CASH', 'Cash', 'DR', 0, 'DR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA-BANK'), 'A-BANK', 'Bank', 'DR', 0, 'DR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA-AR'), 'A-AR', 'Accounts Receivable', 'DR', 0, 'DR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'LI-AP'), 'L-AP', 'Accounts Payable', 'CR', 0, 'CR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'IN-SALES'), 'I-SALES', 'Sales', 'CR', 0, 'CR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EX-PUR'), 'E-PUR', 'Purchases', 'DR', 0, 'DR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EX-IND'), 'E-RENT', 'Rent Expense', 'DR', 0, 'DR', TRUE),
+      ($1, (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EQ'), 'EQ-CAP', 'Capital Account', 'CR', 0, 'CR', TRUE)
+     ON CONFLICT (business_id, code) DO NOTHING`,
+    [businessId]
+  );
 }
 
 authRouter.post('/login', async (req, res, next) => {
@@ -145,7 +200,10 @@ authRouter.post('/register', async (req, res, next) => {
       throw httpError(401, 'Invalid owner credentials');
     }
 
-    const businessId = payload.businessId || owner.businessId || DEFAULT_BUSINESS_ID;
+    const businessId = owner.businessId;
+    if (!businessId) {
+      throw httpError(500, 'Owner business context is missing');
+    }
     const username = normalizeUsername(payload.username);
     const passwordHash = hashPassword(payload.password);
 
@@ -181,13 +239,81 @@ authRouter.post('/register', async (req, res, next) => {
   }
 });
 
+authRouter.post('/signup', async (req, res, next) => {
+  const client = await pool.connect();
+  try {
+    const payload = signupSchema.parse(req.body);
+    const username = normalizeUsername(payload.username);
+
+    const existing = await client.query(`SELECT 1 FROM app_users WHERE LOWER(username) = LOWER($1) LIMIT 1`, [
+      username
+    ]);
+    if (existing.rows.length > 0) {
+      throw httpError(409, 'Username already exists');
+    }
+
+    await client.query('BEGIN');
+
+    const businessRes = await client.query(
+      `INSERT INTO businesses (name, base_currency)
+       VALUES ($1, $2)
+       RETURNING id`,
+      [payload.companyName.trim(), payload.baseCurrency.toUpperCase()]
+    );
+
+    const businessId = businessRes.rows[0].id;
+    await bootstrapBusinessDefaults(client, businessId);
+
+    const ownerRes = await client.query(
+      `INSERT INTO app_users (business_id, username, display_name, password_hash, role, is_active, created_by)
+       VALUES ($1, $2, $3, $4, 'OWNER', TRUE, 'SYSTEM')
+       RETURNING id, username, display_name AS "displayName", role`,
+      [businessId, username, payload.displayName.trim(), hashPassword(payload.password)]
+    );
+
+    await client.query('COMMIT');
+
+    const owner = ownerRes.rows[0];
+    const token = createAuthToken(
+      {
+        sub: owner.id,
+        username: owner.username,
+        businessId,
+        name: owner.displayName,
+        role: owner.role
+      },
+      env.authSecret
+    );
+
+    res.status(201).json({
+      token,
+      user: {
+        id: owner.id,
+        username: owner.username,
+        displayName: owner.displayName,
+        role: owner.role,
+        businessId
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    if (error instanceof z.ZodError) {
+      return next(httpError(400, 'Invalid signup payload', error.issues));
+    }
+    next(error);
+  } finally {
+    client.release();
+  }
+});
+
 authRouter.get('/me', requireAuth, (req, res) => {
+  const businessId = getAuthBusinessId(req);
   res.json({
     id: req.user.sub,
     username: req.user.username || req.user.sub,
     displayName: req.user.name,
     role: req.user.role,
-    businessId: req.user.businessId || DEFAULT_BUSINESS_ID
+    businessId
   });
 });
 
@@ -198,7 +324,7 @@ authRouter.post('/change-password', requireAuth, async (req, res, next) => {
       throw httpError(400, 'New password must be different from current password');
     }
 
-    const businessId = req.user.businessId || DEFAULT_BUSINESS_ID;
+    const businessId = getAuthBusinessId(req);
 
     let result = await pool.query(
       `SELECT id, password_hash AS "passwordHash"
@@ -246,7 +372,7 @@ authRouter.post('/change-password', requireAuth, async (req, res, next) => {
 authRouter.get('/users', requireAuth, async (req, res, next) => {
   try {
     requireOwner(req);
-    const businessId = getRequestBusinessId(req, req.query.businessId);
+    const businessId = getAuthBusinessId(req);
     const result = await pool.query(
       `SELECT id,
               username,
@@ -270,7 +396,7 @@ authRouter.post('/users', requireAuth, async (req, res, next) => {
   try {
     requireOwner(req);
     const payload = userCreateSchema.parse(req.body);
-    const businessId = getRequestBusinessId(req, payload.businessId);
+    const businessId = getAuthBusinessId(req);
     const username = normalizeUsername(payload.username);
     const passwordHash = hashPassword(payload.password);
 

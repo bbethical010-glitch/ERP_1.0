@@ -51,6 +51,9 @@ export async function ensureRuntimeArtifacts() {
     `CREATE INDEX IF NOT EXISTS idx_app_users_business_active_username ON app_users (business_id, is_active, username)`
   );
   await pool.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username_unique_ci ON app_users (LOWER(username))`
+  );
+  await pool.query(
     `INSERT INTO app_users (
        business_id, username, display_name, password_hash, role, is_active, created_by
      ) VALUES ($1, $2, $3, $4, 'OWNER', TRUE, 'SYSTEM')

@@ -15,7 +15,6 @@ import { httpError } from '../../utils/httpError.js';
 export const vouchersRouter = Router();
 
 const voucherSchema = z.object({
-  businessId: z.string().uuid(),
   voucherType: z.enum(['JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE', 'CONTRA']),
   voucherNumber: z.string().min(1).optional(),
   voucherDate: z.string().date(),
@@ -34,7 +33,6 @@ const voucherSchema = z.object({
 });
 
 const reversalSchema = z.object({
-  businessId: z.string().uuid(),
   reversalVoucherNumber: z.string().min(1).optional(),
   reversalDate: z.string().date().optional(),
   narration: z.string().optional(),
@@ -42,7 +40,6 @@ const reversalSchema = z.object({
 });
 
 const lifecycleSchema = z.object({
-  businessId: z.string().uuid(),
   actorId: z.string().optional(),
   voucherType: z.enum(['JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE', 'CONTRA']).optional(),
   voucherNumber: z.string().min(1).optional(),
@@ -59,10 +56,22 @@ const lifecycleSchema = z.object({
     .optional()
 });
 
+function getBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
+
 vouchersRouter.post('/', async (req, res, next) => {
   try {
     const payload = voucherSchema.parse(req.body);
-    const result = await createVoucher(payload);
+    const result = await createVoucher({
+      ...payload,
+      businessId: getBusinessId(req),
+      actorId: req.user?.sub
+    });
     res.status(201).json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -74,14 +83,10 @@ vouchersRouter.post('/', async (req, res, next) => {
 
 vouchersRouter.get('/', async (req, res, next) => {
   try {
-    const { businessId, from, to, voucherType, status, search, limit, offset } = req.query;
-
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const { from, to, voucherType, status, search, limit, offset } = req.query;
 
     const result = await listVouchers({
-      businessId,
+      businessId: getBusinessId(req),
       from,
       to,
       voucherType,
@@ -99,12 +104,7 @@ vouchersRouter.get('/', async (req, res, next) => {
 
 vouchersRouter.get('/:voucherId', async (req, res, next) => {
   try {
-    const businessId = req.query.businessId;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
-
-    const voucher = await getVoucherById(req.params.voucherId, businessId);
+    const voucher = await getVoucherById(req.params.voucherId, getBusinessId(req));
     res.json(voucher);
   } catch (error) {
     next(error);
@@ -114,7 +114,11 @@ vouchersRouter.get('/:voucherId', async (req, res, next) => {
 vouchersRouter.post('/:voucherId/post', async (req, res, next) => {
   try {
     const payload = lifecycleSchema.parse(req.body);
-    const result = await postVoucher(req.params.voucherId, payload);
+    const result = await postVoucher(req.params.voucherId, {
+      ...payload,
+      businessId: getBusinessId(req),
+      actorId: req.user?.sub
+    });
     res.json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -127,7 +131,11 @@ vouchersRouter.post('/:voucherId/post', async (req, res, next) => {
 vouchersRouter.post('/:voucherId/cancel', async (req, res, next) => {
   try {
     const payload = lifecycleSchema.parse(req.body);
-    const result = await cancelVoucher(req.params.voucherId, payload);
+    const result = await cancelVoucher(req.params.voucherId, {
+      ...payload,
+      businessId: getBusinessId(req),
+      actorId: req.user?.sub
+    });
     res.json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -142,6 +150,8 @@ vouchersRouter.post('/:voucherId/reverse', async (req, res, next) => {
     const payload = reversalSchema.parse(req.body);
     const result = await reverseVoucher(req.params.voucherId, {
       ...payload,
+      businessId: getBusinessId(req),
+      actorId: req.user?.sub,
       reversalDate: payload.reversalDate || new Date().toISOString().slice(0, 10)
     });
     res.status(201).json(result);
@@ -156,7 +166,11 @@ vouchersRouter.post('/:voucherId/reverse', async (req, res, next) => {
 vouchersRouter.put('/:voucherId', async (req, res, next) => {
   try {
     const payload = voucherSchema.parse(req.body);
-    const result = await updateVoucher(req.params.voucherId, payload);
+    const result = await updateVoucher(req.params.voucherId, {
+      ...payload,
+      businessId: getBusinessId(req),
+      actorId: req.user?.sub
+    });
     res.json(result);
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -168,11 +182,7 @@ vouchersRouter.put('/:voucherId', async (req, res, next) => {
 
 vouchersRouter.delete('/:voucherId', async (req, res, next) => {
   try {
-    const businessId = req.query.businessId;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
-    const result = await deleteVoucher(req.params.voucherId, businessId);
+    const result = await deleteVoucher(req.params.voucherId, getBusinessId(req));
     res.json(result);
   } catch (error) {
     next(error);

@@ -4,6 +4,14 @@ import { httpError } from '../../utils/httpError.js';
 
 export const reportsRouter = Router();
 
+function getBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
+
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -38,10 +46,8 @@ WITH account_balances AS (
 
 reportsRouter.get('/trial-balance', async (req, res, next) => {
   try {
-    const { businessId, from, to } = req.query;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const { from, to } = req.query;
+    const businessId = getBusinessId(req);
 
     const result = await pool.query(
       `${balanceCte}
@@ -91,10 +97,7 @@ reportsRouter.get('/trial-balance', async (req, res, next) => {
 
 reportsRouter.get('/profit-loss', async (req, res, next) => {
   try {
-    const { businessId } = req.query;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const businessId = getBusinessId(req);
     const to = req.query.to || todayIso();
     const from = req.query.from || fyStart(to);
     const compareFrom = req.query.compareFrom || `${Number(from.slice(0, 4)) - 1}${from.slice(4)}`;
@@ -164,10 +167,8 @@ reportsRouter.get('/profit-loss', async (req, res, next) => {
 
 reportsRouter.get('/balance-sheet', async (req, res, next) => {
   try {
-    const { businessId, from, to } = req.query;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const { from, to } = req.query;
+    const businessId = getBusinessId(req);
 
     const result = await pool.query(
       `${balanceCte}

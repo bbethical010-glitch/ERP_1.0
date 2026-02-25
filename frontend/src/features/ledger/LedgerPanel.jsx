@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID } from '../../lib/constants';
+import { useAuth } from '../../auth/AuthContext';
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -10,20 +10,23 @@ function formatAmount(value) {
 
 export function LedgerPanel() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const [accountId, setAccountId] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
 
   const { data: accounts = [] } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => api.get(`/accounts?businessId=${DEMO_BUSINESS_ID}`)
+    queryKey: ['accounts', businessId],
+    enabled: Boolean(businessId),
+    queryFn: () => api.get('/accounts')
   });
 
   const { data } = useQuery({
-    queryKey: ['ledger', accountId, from, to],
-    enabled: Boolean(accountId),
+    queryKey: ['ledger', businessId, accountId, from, to],
+    enabled: Boolean(accountId && businessId),
     queryFn: () => {
-      const q = new URLSearchParams({ businessId: DEMO_BUSINESS_ID });
+      const q = new URLSearchParams();
       if (from) q.set('from', from);
       if (to) q.set('to', to);
       return api.get(`/ledger/${accountId}?${q.toString()}`);

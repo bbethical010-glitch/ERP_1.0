@@ -4,12 +4,18 @@ import { httpError } from '../../utils/httpError.js';
 
 export const daybookRouter = Router();
 
+function getBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
+
 daybookRouter.get('/', async (req, res, next) => {
   try {
-    const { businessId, from, to, voucherType, status, limit = 50, offset = 0 } = req.query;
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
+    const { from, to, voucherType, status, limit = 50, offset = 0 } = req.query;
+    const businessId = getBusinessId(req);
 
     const result = await pool.query(
       `SELECT

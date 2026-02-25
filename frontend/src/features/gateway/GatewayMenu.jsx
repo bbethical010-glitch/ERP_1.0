@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID } from '../../lib/constants';
+import { useAuth } from '../../auth/AuthContext';
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,11 +18,14 @@ const quickActions = [
 
 export function GatewayMenu() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
 
   const { data, isLoading } = useQuery({
-    queryKey: ['dashboard-summary', today],
-    queryFn: () => api.get(`/dashboard/summary?businessId=${DEMO_BUSINESS_ID}&asOf=${today}`)
+    queryKey: ['dashboard-summary', businessId, today],
+    enabled: Boolean(businessId),
+    queryFn: () => api.get(`/dashboard/summary?asOf=${today}`)
   });
 
   if (isLoading) {

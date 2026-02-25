@@ -4,6 +4,14 @@ import { httpError } from '../../utils/httpError.js';
 
 export const dashboardRouter = Router();
 
+function getBusinessId(req) {
+  const businessId = req.user?.businessId;
+  if (!businessId) {
+    throw httpError(401, 'Business context missing in auth token');
+  }
+  return businessId;
+}
+
 function monthStart(date) {
   const [year, month] = date.split('-');
   return `${year}-${month}-01`;
@@ -17,12 +25,8 @@ function fyStart(date) {
 
 dashboardRouter.get('/summary', async (req, res, next) => {
   try {
-    const businessId = req.query.businessId;
+    const businessId = getBusinessId(req);
     const asOf = req.query.asOf || new Date().toISOString().slice(0, 10);
-
-    if (!businessId) {
-      throw httpError(400, 'businessId query parameter is required');
-    }
 
     const kpiRes = await pool.query(
       `WITH balances AS (

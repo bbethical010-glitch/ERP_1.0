@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID } from '../../lib/constants';
+import { useAuth } from '../../auth/AuthContext';
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -26,14 +26,17 @@ function PeriodFilter({ from, to, setFrom, setTo }) {
 }
 
 export function TrialBalancePanel() {
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(today.slice(0, 4) + '-04-01');
   const [to, setTo] = useState(today);
   const [expanded, setExpanded] = useState({});
 
   const { data } = useQuery({
-    queryKey: ['trial-balance', from, to],
-    queryFn: () => api.get(`/reports/trial-balance?businessId=${DEMO_BUSINESS_ID}&from=${from}&to=${to}`)
+    queryKey: ['trial-balance', businessId, from, to],
+    enabled: Boolean(businessId),
+    queryFn: () => api.get(`/reports/trial-balance?from=${from}&to=${to}`)
   });
 
   const grouped = data?.grouped || {};
@@ -95,6 +98,8 @@ export function TrialBalancePanel() {
 }
 
 export function ProfitLossPanel() {
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(today.slice(0, 4) + '-04-01');
   const [to, setTo] = useState(today);
@@ -102,10 +107,11 @@ export function ProfitLossPanel() {
   const compareTo = `${Number(to.slice(0, 4)) - 1}${to.slice(4)}`;
 
   const { data } = useQuery({
-    queryKey: ['profit-loss', from, to],
+    queryKey: ['profit-loss', businessId, from, to],
+    enabled: Boolean(businessId),
     queryFn: () =>
       api.get(
-        `/reports/profit-loss?businessId=${DEMO_BUSINESS_ID}&from=${from}&to=${to}&compareFrom=${compareFrom}&compareTo=${compareTo}`
+        `/reports/profit-loss?from=${from}&to=${to}&compareFrom=${compareFrom}&compareTo=${compareTo}`
       )
   });
 
@@ -131,13 +137,16 @@ export function ProfitLossPanel() {
 }
 
 export function BalanceSheetPanel() {
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
   const [from, setFrom] = useState(today.slice(0, 4) + '-04-01');
   const [to, setTo] = useState(today);
 
   const { data } = useQuery({
-    queryKey: ['balance-sheet', from, to],
-    queryFn: () => api.get(`/reports/balance-sheet?businessId=${DEMO_BUSINESS_ID}&from=${from}&to=${to}`)
+    queryKey: ['balance-sheet', businessId, from, to],
+    enabled: Boolean(businessId),
+    queryFn: () => api.get(`/reports/balance-sheet?from=${from}&to=${to}`)
   });
 
   return (

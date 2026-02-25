@@ -2,9 +2,6 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
-import { USER_ROLES } from '../lib/constants';
-
-const REGISTERABLE_ROLES = USER_ROLES.filter((role) => role !== 'OWNER');
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -18,12 +15,10 @@ export function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [registerForm, setRegisterForm] = useState({
-    ownerUsername: '',
-    ownerPassword: '',
+    companyName: '',
     username: '',
     displayName: '',
-    password: '',
-    role: 'ACCOUNTANT'
+    password: ''
   });
   const [registerError, setRegisterError] = useState('');
   const [registerSuccess, setRegisterSuccess] = useState('');
@@ -58,21 +53,19 @@ export function LoginPage() {
 
     try {
       await api.post(
-        '/auth/register',
+        '/auth/signup',
         {
-          ownerUsername: registerForm.ownerUsername,
-          ownerPassword: registerForm.ownerPassword,
+          companyName: registerForm.companyName,
           username: registerForm.username,
           displayName: registerForm.displayName,
-          password: registerForm.password,
-          role: registerForm.role
+          password: registerForm.password
         },
         { skipAuth: true }
       );
       setRegisterSuccess('User created successfully. You can sign in now.');
       setRegisterForm((prev) => ({
         ...prev,
-        ownerPassword: '',
+        companyName: '',
         username: '',
         displayName: '',
         password: ''
@@ -141,21 +134,11 @@ export function LoginPage() {
         ) : (
           <form className="p-4 grid gap-3 text-sm" onSubmit={onSignUp}>
             <label className="flex flex-col gap-1">
-              Owner Username
+              Company Name
               <input
                 className="focusable border border-tally-panelBorder bg-white p-2"
-                value={registerForm.ownerUsername}
-                onChange={(e) => onRegisterChange('ownerUsername', e.target.value)}
-                required
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              Owner Password
-              <input
-                type="password"
-                className="focusable border border-tally-panelBorder bg-white p-2"
-                value={registerForm.ownerPassword}
-                onChange={(e) => onRegisterChange('ownerPassword', e.target.value)}
+                value={registerForm.companyName}
+                onChange={(e) => onRegisterChange('companyName', e.target.value)}
                 required
               />
             </label>
@@ -187,20 +170,6 @@ export function LoginPage() {
                 required
                 minLength={6}
               />
-            </label>
-            <label className="flex flex-col gap-1">
-              Role
-              <select
-                className="focusable border border-tally-panelBorder bg-white p-2"
-                value={registerForm.role}
-                onChange={(e) => onRegisterChange('role', e.target.value)}
-              >
-                {REGISTERABLE_ROLES.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
             </label>
             <button
               type="submit"

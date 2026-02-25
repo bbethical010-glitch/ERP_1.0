@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS app_users (
 );
 
 CREATE INDEX IF NOT EXISTS idx_app_users_business_active_username ON app_users (business_id, is_active, username);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_users_username_unique_ci ON app_users (LOWER(username));
 
 CREATE TABLE IF NOT EXISTS account_groups (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

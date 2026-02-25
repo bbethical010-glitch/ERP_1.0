@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID, VOUCHER_TYPES } from '../../lib/constants';
+import { VOUCHER_TYPES } from '../../lib/constants';
 import { useGlobalShortcuts } from '../../hooks/useGlobalShortcuts';
+import { useAuth } from '../../auth/AuthContext';
 
 const emptyLine = { accountId: '', entryType: 'DR', amount: '' };
 
@@ -21,6 +22,8 @@ function computeTotals(entries) {
 export function VoucherEntryForm({ voucherId }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
+  const businessId = user?.businessId;
   const [searchParams] = useSearchParams();
   const prefilledType = searchParams.get('vtype');
 
@@ -39,14 +42,15 @@ export function VoucherEntryForm({ voucherId }) {
   const isEditMode = Boolean(voucherId);
 
   const { data: accounts = [] } = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => api.get(`/accounts?businessId=${DEMO_BUSINESS_ID}`)
+    queryKey: ['accounts', businessId],
+    enabled: Boolean(businessId),
+    queryFn: () => api.get('/accounts')
   });
 
   const { data: existingVoucher, isLoading: isVoucherLoading } = useQuery({
-    queryKey: ['voucher', voucherId],
-    enabled: isEditMode,
-    queryFn: () => api.get(`/vouchers/${voucherId}?businessId=${DEMO_BUSINESS_ID}`)
+    queryKey: ['voucher', businessId, voucherId],
+    enabled: isEditMode && Boolean(businessId),
+    queryFn: () => api.get(`/vouchers/${voucherId}`)
   });
 
   useEffect(() => {
@@ -86,12 +90,10 @@ export function VoucherEntryForm({ voucherId }) {
   const createOrSaveDraft = useMutation({
     mutationFn: async (mode) => {
       const payload = {
-        businessId: DEMO_BUSINESS_ID,
         voucherType,
         voucherNumber: voucherNumber || undefined,
         voucherDate,
         narration,
-        actorId: 'SYSTEM',
         mode,
         entries: entries.map((line) => ({
           accountId: line.accountId,
@@ -117,8 +119,6 @@ export function VoucherEntryForm({ voucherId }) {
   const postDraft = useMutation({
     mutationFn: async () =>
       api.post(`/vouchers/${voucherId}/post`, {
-        businessId: DEMO_BUSINESS_ID,
-        actorId: 'SYSTEM',
         voucherType,
         voucherNumber: voucherNumber || undefined,
         voucherDate,
@@ -142,10 +142,7 @@ export function VoucherEntryForm({ voucherId }) {
 
   const cancelDraft = useMutation({
     mutationFn: async () =>
-      api.post(`/vouchers/${voucherId}/cancel`, {
-        businessId: DEMO_BUSINESS_ID,
-        actorId: 'SYSTEM'
-      }),
+      api.post(`/vouchers/${voucherId}/cancel`, {}),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
@@ -156,11 +153,9 @@ export function VoucherEntryForm({ voucherId }) {
   const reverseVoucher = useMutation({
     mutationFn: async () =>
       api.post(`/vouchers/${voucherId}/reverse`, {
-        businessId: DEMO_BUSINESS_ID,
         reversalVoucherNumber: reversalNumber || undefined,
         reversalDate,
-        narration: `Reversal of voucher ${voucherNumber}`,
-        actorId: 'SYSTEM'
+        narration: `Reversal of voucher ${voucherNumber}`
       }),
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });

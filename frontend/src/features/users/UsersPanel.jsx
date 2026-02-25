@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID, USER_ROLES } from '../../lib/constants';
+import { USER_ROLES } from '../../lib/constants';
 import { useAuth } from '../../auth/AuthContext';
 
 function formatDateTime(value) {
@@ -14,7 +14,7 @@ function formatDateTime(value) {
 export function UsersPanel() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const businessId = user?.businessId || DEMO_BUSINESS_ID;
+  const businessId = user?.businessId;
   const canManageUsers = user?.role === 'OWNER';
 
   const [form, setForm] = useState({
@@ -27,9 +27,9 @@ export function UsersPanel() {
   const [success, setSuccess] = useState('');
 
   const usersQuery = useQuery({
-    enabled: canManageUsers,
+    enabled: canManageUsers && Boolean(businessId),
     queryKey: ['auth-users', businessId],
-    queryFn: () => api.get(`/auth/users?businessId=${businessId}`)
+    queryFn: () => api.get('/auth/users')
   });
 
   const users = useMemo(() => usersQuery.data?.items || [], [usersQuery.data]);
@@ -62,7 +62,6 @@ export function UsersPanel() {
     setError('');
     setSuccess('');
     createUserMutation.mutate({
-      businessId,
       username: form.username,
       displayName: form.displayName,
       password: form.password,
