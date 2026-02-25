@@ -3,25 +3,27 @@ import { useEffect } from 'react';
 function isTypingTarget(target) {
   if (!target) return false;
   const tag = target.tagName?.toLowerCase();
-  return tag === 'input' || tag === 'textarea' || target.isContentEditable;
+  return tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable;
 }
 
 export function useGlobalShortcuts(handlers) {
   useEffect(() => {
     function onKeyDown(event) {
+      if (event.defaultPrevented) return;
+      const typing = isTypingTarget(event.target);
       const key = event.key.toLowerCase();
-      const createPressed = event.altKey && key === 'c';
+      const createPressed = !typing && event.altKey && key === 'c';
       if (createPressed && handlers.onCreate) {
         event.preventDefault();
         handlers.onCreate();
       }
 
-      if (event.key === 'Escape' && handlers.onBack) {
+      if (!typing && event.key === 'Escape' && handlers.onBack) {
         event.preventDefault();
         handlers.onBack();
       }
 
-      const savePressed = !isTypingTarget(event.target) && event.key === 'Enter';
+      const savePressed = !typing && event.key === 'Enter';
       if (savePressed && handlers.onSave) {
         event.preventDefault();
         handlers.onSave();

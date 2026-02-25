@@ -34,7 +34,12 @@ export const router = createBrowserRouter([
       { path: 'daybook', element: <DaybookPage /> },
       { path: 'reports/trial-balance', element: <TrialBalancePage /> },
       { path: 'reports/profit-loss', element: <ProfitLossPage /> },
-      { path: 'reports/balance-sheet', element: <BalanceSheetPage /> }
+      { path: 'reports/balance-sheet', element: <BalanceSheetPage /> },
+      { path: '*', element: <Navigate to="/gateway" replace /> }
     ]
+  },
+  {
+    path: '*',
+    element: <Navigate to="/login" replace />
   }
 ]);

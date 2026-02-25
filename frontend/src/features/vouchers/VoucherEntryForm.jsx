@@ -1,23 +1,42 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { DEMO_BUSINESS_ID, VOUCHER_TYPES } from '../../lib/constants';
 import { useGlobalShortcuts } from '../../hooks/useGlobalShortcuts';
 
 const emptyLine = { accountId: '', entryType: 'DR', amount: '' };
 
+function computeTotals(entries) {
+  const debit = entries
+    .filter((line) => line.entryType === 'DR')
+    .reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+  const credit = entries
+    .filter((line) => line.entryType === 'CR')
+    .reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
+  const difference = Number((debit - credit).toFixed(2));
+  return { debit, credit, difference, isBalanced: difference === 0 };
+}
+
 export function VoucherEntryForm({ voucherId }) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const isEditMode = Boolean(voucherId);
-  const [voucherType, setVoucherType] = useState('JOURNAL');
-  const [voucherNumber, setVoucherNumber] = useState('1');
+  const [searchParams] = useSearchParams();
+  const prefilledType = searchParams.get('vtype');
+
+  const [voucherType, setVoucherType] = useState(
+    VOUCHER_TYPES.includes(prefilledType) ? prefilledType : 'JOURNAL'
+  );
+  const [voucherNumber, setVoucherNumber] = useState('');
   const [voucherDate, setVoucherDate] = useState(new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState('');
   const [entries, setEntries] = useState([emptyLine, { ...emptyLine, entryType: 'CR' }]);
-  const [reversalVoucherNumber, setReversalVoucherNumber] = useState('');
+  const [ledgerSearch, setLedgerSearch] = useState('');
+  const [lineError, setLineError] = useState('');
+  const [reversalNumber, setReversalNumber] = useState('');
   const [reversalDate, setReversalDate] = useState(new Date().toISOString().slice(0, 10));
+
+  const isEditMode = Boolean(voucherId);
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts'],
@@ -33,7 +52,7 @@ export function VoucherEntryForm({ voucherId }) {
   useEffect(() => {
     if (!existingVoucher) return;
     setVoucherType(existingVoucher.voucherType);
-    setVoucherNumber(existingVoucher.voucherNumber);
+    setVoucherNumber(existingVoucher.voucherNumber || '');
     setVoucherDate(existingVoucher.voucherDate);
     setNarration(existingVoucher.narration || '');
     setEntries(
@@ -43,18 +62,37 @@ export function VoucherEntryForm({ voucherId }) {
         amount: String(line.amount)
       }))
     );
-    setReversalVoucherNumber(`RV-${existingVoucher.voucherNumber}`);
+    setReversalNumber(`RV-${existingVoucher.voucherNumber || '0001'}`);
   }, [existingVoucher]);
 
-  const createVoucher = useMutation({
-    mutationFn: async () => {
+  const canEdit = !isEditMode || existingVoucher?.status === 'DRAFT';
+  const isPosted = isEditMode && existingVoucher?.status === 'POSTED';
+  const isReversed = isEditMode && existingVoucher?.status === 'REVERSED';
+  const isCancelled = isEditMode && existingVoucher?.status === 'CANCELLED';
+
+  const filteredAccounts = useMemo(() => {
+    if (!ledgerSearch.trim()) return accounts;
+    const q = ledgerSearch.toLowerCase();
+    return accounts.filter(
+      (account) =>
+        account.name.toLowerCase().includes(q) ||
+        account.code.toLowerCase().includes(q) ||
+        String(account.groupName || '').toLowerCase().includes(q)
+    );
+  }, [accounts, ledgerSearch]);
+
+  const totals = useMemo(() => computeTotals(entries), [entries]);
+
+  const createOrSaveDraft = useMutation({
+    mutationFn: async (mode) => {
       const payload = {
         businessId: DEMO_BUSINESS_ID,
         voucherType,
-        voucherNumber,
+        voucherNumber: voucherNumber || undefined,
         voucherDate,
         narration,
         actorId: 'SYSTEM',
+        mode,
         entries: entries.map((line) => ({
           accountId: line.accountId,
           entryType: line.entryType,
@@ -63,18 +101,55 @@ export function VoucherEntryForm({ voucherId }) {
       };
       return api.post('/vouchers', payload);
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
       queryClient.invalidateQueries({ queryKey: ['daybook'] });
       queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
       queryClient.invalidateQueries({ queryKey: ['profit-loss'] });
       queryClient.invalidateQueries({ queryKey: ['balance-sheet'] });
-      setNarration('');
-      setEntries([emptyLine, { ...emptyLine, entryType: 'CR' }]);
-      const parsedVoucherNo = Number(voucherNumber);
-      if (Number.isFinite(parsedVoucherNo)) {
-        setVoucherNumber(String(parsedVoucherNo + 1));
+      if (result.id) {
+        navigate(`/vouchers/${result.id}/edit`);
       }
+    }
+  });
+
+  const postDraft = useMutation({
+    mutationFn: async () =>
+      api.post(`/vouchers/${voucherId}/post`, {
+        businessId: DEMO_BUSINESS_ID,
+        actorId: 'SYSTEM',
+        voucherType,
+        voucherNumber: voucherNumber || undefined,
+        voucherDate,
+        narration,
+        entries: entries.map((line) => ({
+          accountId: line.accountId,
+          entryType: line.entryType,
+          amount: Number(line.amount)
+        }))
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+      queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
+      queryClient.invalidateQueries({ queryKey: ['daybook'] });
+      queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
+      queryClient.invalidateQueries({ queryKey: ['profit-loss'] });
+      queryClient.invalidateQueries({ queryKey: ['balance-sheet'] });
+    }
+  });
+
+  const cancelDraft = useMutation({
+    mutationFn: async () =>
+      api.post(`/vouchers/${voucherId}/cancel`, {
+        businessId: DEMO_BUSINESS_ID,
+        actorId: 'SYSTEM'
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['vouchers'] });
+      queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
+      navigate('/vouchers');
     }
   });
 
@@ -82,7 +157,7 @@ export function VoucherEntryForm({ voucherId }) {
     mutationFn: async () =>
       api.post(`/vouchers/${voucherId}/reverse`, {
         businessId: DEMO_BUSINESS_ID,
-        reversalVoucherNumber,
+        reversalVoucherNumber: reversalNumber || undefined,
         reversalDate,
         narration: `Reversal of voucher ${voucherNumber}`,
         actorId: 'SYSTEM'
@@ -90,60 +165,87 @@ export function VoucherEntryForm({ voucherId }) {
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
       queryClient.invalidateQueries({ queryKey: ['daybook'] });
       queryClient.invalidateQueries({ queryKey: ['trial-balance'] });
       queryClient.invalidateQueries({ queryKey: ['profit-loss'] });
       queryClient.invalidateQueries({ queryKey: ['balance-sheet'] });
-      navigate(`/vouchers/${result.reversalVoucherId}/edit`);
+      if (result.reversalVoucherId) {
+        navigate(`/vouchers/${result.reversalVoucherId}/edit`);
+      }
     }
   });
 
-  const totals = useMemo(() => {
-    const debit = entries
-      .filter((line) => line.entryType === 'DR')
-      .reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
-    const credit = entries
-      .filter((line) => line.entryType === 'CR')
-      .reduce((sum, line) => sum + (Number(line.amount) || 0), 0);
-    return { debit, credit };
-  }, [entries]);
+  function validateLines() {
+    if (entries.length < 2) {
+      setLineError('At least 2 ledger lines required');
+      return false;
+    }
 
-  const fieldsDisabled = isEditMode;
+    for (const line of entries) {
+      if (!line.accountId) {
+        setLineError('All lines must have a ledger account');
+        return false;
+      }
+      if (!Number.isFinite(Number(line.amount)) || Number(line.amount) <= 0) {
+        setLineError('All lines must have amount greater than zero');
+        return false;
+      }
+    }
+
+    setLineError('');
+    return true;
+  }
 
   function updateLine(index, key, value) {
-    if (fieldsDisabled) return;
     setEntries((prev) => prev.map((line, i) => (i === index ? { ...line, [key]: value } : line)));
   }
 
   function addLine() {
-    if (fieldsDisabled) return;
+    if (!canEdit) return;
     setEntries((prev) => [...prev, { ...emptyLine }]);
   }
 
-  function submit(event) {
-    event?.preventDefault();
-    if (fieldsDisabled) return;
-    createVoucher.mutate();
+  function autoBalanceToLastLine() {
+    if (!canEdit || entries.length === 0) return;
+    const diff = totals.difference;
+    if (diff === 0) return;
+    const idx = entries.length - 1;
+    const entryType = diff > 0 ? 'CR' : 'DR';
+    const amount = Math.abs(diff).toFixed(2);
+    setEntries((prev) => prev.map((line, i) => (i === idx ? { ...line, entryType, amount } : line)));
   }
 
-  useGlobalShortcuts(
-    fieldsDisabled
-      ? {
-          onSave: undefined
-        }
-      : {
-          onSave: submit
-        }
-  );
+  function saveDraft() {
+    if (!canEdit) return;
+    if (!validateLines()) return;
+    createOrSaveDraft.mutate('DRAFT');
+  }
+
+  function postNow(event) {
+    event?.preventDefault();
+    if (!validateLines()) return;
+
+    if (isEditMode && existingVoucher?.status === 'DRAFT') {
+      postDraft.mutate();
+      return;
+    }
+
+    createOrSaveDraft.mutate('POST');
+  }
+
+  useGlobalShortcuts({
+    onSave: postNow
+  });
 
   function onFormKeyDown(event) {
-    if (!fieldsDisabled && event.altKey && event.key.toLowerCase() === 'a') {
+    if (event.altKey && event.key.toLowerCase() === 'a') {
       event.preventDefault();
       addLine();
       return;
     }
 
-    if (fieldsDisabled && !existingVoucher?.isReversed && event.altKey && event.key.toLowerCase() === 'r') {
+    if (isPosted && event.altKey && event.key.toLowerCase() === 'r') {
       event.preventDefault();
       reverseVoucher.mutate();
     }
@@ -154,15 +256,19 @@ export function VoucherEntryForm({ voucherId }) {
   }
 
   return (
-    <form className="boxed shadow-panel" onSubmit={submit} onKeyDown={onFormKeyDown}>
-      <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">
-        {isEditMode ? 'Voucher Details (Immutable)' : 'Voucher Entry'}
+    <form className="boxed shadow-panel" onSubmit={postNow} onKeyDown={onFormKeyDown}>
+      <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold flex items-center justify-between">
+        <span>{isEditMode ? `Voucher (${existingVoucher?.status || '...'})` : 'Voucher Entry'}</span>
+        <span className={totals.isBalanced ? '' : 'text-red-200'}>
+          DR {totals.debit.toFixed(2)} | CR {totals.credit.toFixed(2)} | Diff {totals.difference.toFixed(2)}
+        </span>
       </div>
-      <div className="p-3 grid gap-3 md:grid-cols-4 text-sm">
+
+      <div className="p-3 grid gap-3 md:grid-cols-6 text-sm">
         <label className="flex flex-col gap-1">
           Type
           <select
-            disabled={fieldsDisabled}
+            disabled={!canEdit}
             className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
             value={voucherType}
             onChange={(e) => setVoucherType(e.target.value)}
@@ -172,32 +278,46 @@ export function VoucherEntryForm({ voucherId }) {
             ))}
           </select>
         </label>
+
         <label className="flex flex-col gap-1">
           Number
           <input
-            disabled={fieldsDisabled}
+            disabled={!canEdit}
             className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
             value={voucherNumber}
             onChange={(e) => setVoucherNumber(e.target.value)}
+            placeholder="Auto"
           />
         </label>
+
         <label className="flex flex-col gap-1">
           Date
           <input
-            disabled={fieldsDisabled}
-            className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
+            disabled={!canEdit}
             type="date"
+            className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
             value={voucherDate}
             onChange={(e) => setVoucherDate(e.target.value)}
           />
         </label>
-        <label className="flex flex-col gap-1 md:col-span-4">
+
+        <label className="flex flex-col gap-1 md:col-span-3">
           Narration
           <input
-            disabled={fieldsDisabled}
+            disabled={!canEdit}
             className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
             value={narration}
             onChange={(e) => setNarration(e.target.value)}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 md:col-span-2">
+          Ledger Search
+          <input
+            className="focusable border border-tally-panelBorder bg-white p-1"
+            placeholder="Type ledger/group"
+            value={ledgerSearch}
+            onChange={(e) => setLedgerSearch(e.target.value)}
           />
         </label>
       </div>
@@ -206,113 +326,109 @@ export function VoucherEntryForm({ voucherId }) {
         <thead className="bg-tally-tableHeader">
           <tr>
             <th className="text-left">Particulars (Ledger)</th>
+            <th className="text-left">Group</th>
             <th className="text-left">Dr/Cr</th>
             <th className="text-right">Amount</th>
           </tr>
         </thead>
         <tbody>
-          {entries.map((line, idx) => (
-            <tr key={idx}>
-              <td>
-                <select
-                  disabled={fieldsDisabled}
-                  className="focusable w-full border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
-                  value={line.accountId}
-                  onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
-                >
-                  <option value="">Select account</option>
-                  {accounts.map((account) => (
-                    <option key={account.id} value={account.id}>{account.code} - {account.name}</option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <select
-                  disabled={fieldsDisabled}
-                  className="focusable w-full border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
-                  value={line.entryType}
-                  onChange={(e) => updateLine(idx, 'entryType', e.target.value)}
-                >
-                  <option value="DR">DR</option>
-                  <option value="CR">CR</option>
-                </select>
-              </td>
-              <td>
-                <input
-                  disabled={fieldsDisabled}
-                  className="focusable w-full text-right border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={line.amount}
-                  onChange={(e) => updateLine(idx, 'amount', e.target.value)}
-                />
-              </td>
-            </tr>
-          ))}
+          {entries.map((line, idx) => {
+            const selected = accounts.find((acc) => acc.id === line.accountId);
+            return (
+              <tr key={idx} className={!totals.isBalanced && ((totals.difference > 0 && line.entryType === 'DR') || (totals.difference < 0 && line.entryType === 'CR')) ? 'bg-red-50' : ''}>
+                <td>
+                  <select
+                    disabled={!canEdit}
+                    className="focusable w-full border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
+                    value={line.accountId}
+                    onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
+                  >
+                    <option value="">Select account</option>
+                    {filteredAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>{account.code} - {account.name}</option>
+                    ))}
+                  </select>
+                </td>
+                <td>{selected?.groupName || '-'}</td>
+                <td>
+                  <select
+                    disabled={!canEdit}
+                    className="focusable w-full border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
+                    value={line.entryType}
+                    onChange={(e) => updateLine(idx, 'entryType', e.target.value)}
+                  >
+                    <option value="DR">DR</option>
+                    <option value="CR">CR</option>
+                  </select>
+                </td>
+                <td>
+                  <input
+                    disabled={!canEdit}
+                    className="focusable w-full text-right border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={line.amount}
+                    onChange={(e) => updateLine(idx, 'amount', e.target.value)}
+                  />
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
-        <tfoot>
-          <tr className="bg-tally-tableHeader font-semibold">
-            <td className="text-right" colSpan={2}>Debit Total</td>
-            <td className="text-right">{totals.debit.toFixed(2)}</td>
-          </tr>
-          <tr className="bg-tally-tableHeader font-semibold">
-            <td className="text-right" colSpan={2}>Credit Total</td>
-            <td className="text-right">{totals.credit.toFixed(2)}</td>
-          </tr>
-        </tfoot>
       </table>
 
       <div className="p-3 flex flex-wrap gap-2 text-sm items-center">
-        {!fieldsDisabled && (
+        {canEdit && (
           <>
             <button type="button" onClick={addLine} className="focusable boxed px-3 py-1">⌥A Add Line</button>
-            <button type="submit" className="focusable bg-tally-header text-white px-3 py-1 border border-tally-panelBorder">
-              Enter Save
+            <button type="button" onClick={autoBalanceToLastLine} className="focusable boxed px-3 py-1">Auto Balance</button>
+            <button type="button" onClick={saveDraft} className="focusable boxed px-3 py-1">Save Draft</button>
+            <button
+              type="submit"
+              disabled={!totals.isBalanced}
+              className="focusable bg-tally-header text-white px-3 py-1 border border-tally-panelBorder disabled:opacity-60"
+            >
+              Post Voucher
             </button>
           </>
         )}
 
-        {fieldsDisabled && (
+        {isEditMode && existingVoucher?.status === 'DRAFT' && (
           <>
-            <span className="text-tally-accent font-semibold">Posted vouchers are immutable.</span>
-            {!existingVoucher?.isReversed && (
-              <>
-                <label className="flex items-center gap-1">
-                  Reversal No.
-                  <input
-                    className="focusable border border-tally-panelBorder bg-white p-1"
-                    value={reversalVoucherNumber}
-                    onChange={(e) => setReversalVoucherNumber(e.target.value)}
-                  />
-                </label>
-                <label className="flex items-center gap-1">
-                  Reversal Date
-                  <input
-                    className="focusable border border-tally-panelBorder bg-white p-1"
-                    type="date"
-                    value={reversalDate}
-                    onChange={(e) => setReversalDate(e.target.value)}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={() => reverseVoucher.mutate()}
-                  className="focusable px-3 py-1 border border-tally-panelBorder bg-tally-header text-white"
-                >
-                  ⌥R Reverse Voucher
-                </button>
-              </>
-            )}
-            {existingVoucher?.isReversed && (
-              <span className="text-tally-warning">This voucher is already reversed.</span>
-            )}
+            <button type="button" onClick={() => postDraft.mutate()} disabled={!totals.isBalanced} className="focusable bg-tally-header text-white px-3 py-1 border border-tally-panelBorder disabled:opacity-60">
+              Post Draft
+            </button>
+            <button type="button" onClick={() => cancelDraft.mutate()} className="focusable boxed px-3 py-1 text-tally-warning border border-tally-warning">
+              Cancel Draft
+            </button>
           </>
         )}
 
-        {createVoucher.isError && <span className="text-tally-warning">{createVoucher.error.message}</span>}
+        {isPosted && (
+          <>
+            <label className="flex items-center gap-1">
+              Reversal No
+              <input className="focusable border border-tally-panelBorder bg-white p-1" value={reversalNumber} onChange={(e) => setReversalNumber(e.target.value)} />
+            </label>
+            <label className="flex items-center gap-1">
+              Reversal Date
+              <input type="date" className="focusable border border-tally-panelBorder bg-white p-1" value={reversalDate} onChange={(e) => setReversalDate(e.target.value)} />
+            </label>
+            <button type="button" onClick={() => reverseVoucher.mutate()} className="focusable bg-tally-header text-white px-3 py-1 border border-tally-panelBorder">
+              ⌥R Reverse
+            </button>
+          </>
+        )}
+
+        {isReversed && <span className="text-tally-warning font-semibold">This voucher is reversed.</span>}
+        {isCancelled && <span className="text-tally-warning font-semibold">This voucher is cancelled.</span>}
+
+        {lineError && <span className="text-tally-warning">{lineError}</span>}
+        {createOrSaveDraft.isError && <span className="text-tally-warning">{createOrSaveDraft.error.message}</span>}
+        {postDraft.isError && <span className="text-tally-warning">{postDraft.error.message}</span>}
+        {cancelDraft.isError && <span className="text-tally-warning">{cancelDraft.error.message}</span>}
         {reverseVoucher.isError && <span className="text-tally-warning">{reverseVoucher.error.message}</span>}
-        {createVoucher.isSuccess && <span className="text-tally-accent">Saved voucher #{voucherNumber}</span>}
       </div>
     </form>
   );

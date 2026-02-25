@@ -6,26 +6,39 @@ export const daybookRouter = Router();
 
 daybookRouter.get('/', async (req, res, next) => {
   try {
-    const { businessId, date } = req.query;
-    if (!businessId || !date) {
-      throw httpError(400, 'businessId and date query parameters are required');
+    const { businessId, from, to, voucherType, status, limit = 50, offset = 0 } = req.query;
+    if (!businessId) {
+      throw httpError(400, 'businessId query parameter is required');
     }
 
     const result = await pool.query(
-      `SELECT v.id, v.voucher_type AS "voucherType", v.voucher_number AS "voucherNumber",
-              v.narration, t.txn_date AS "txnDate",
-              SUM(CASE WHEN te.entry_type = 'DR' THEN te.amount ELSE 0 END) AS "debitTotal",
-              SUM(CASE WHEN te.entry_type = 'CR' THEN te.amount ELSE 0 END) AS "creditTotal"
+      `SELECT
+         v.id,
+         v.voucher_type AS "voucherType",
+         v.voucher_number AS "voucherNumber",
+         v.voucher_date AS "voucherDate",
+         v.status,
+         v.narration,
+         COALESCE(SUM(CASE WHEN vl.entry_type = 'DR' THEN vl.amount ELSE 0 END), 0) AS "debitTotal",
+         COALESCE(SUM(CASE WHEN vl.entry_type = 'CR' THEN vl.amount ELSE 0 END), 0) AS "creditTotal"
        FROM vouchers v
-       JOIN transactions t ON t.id = v.transaction_id
-       JOIN transaction_entries te ON te.transaction_id = t.id
-       WHERE v.business_id = $1 AND t.txn_date = $2::date
-       GROUP BY v.id, v.voucher_type, v.voucher_number, v.narration, t.txn_date
-       ORDER BY v.created_at`,
-      [businessId, date]
+       LEFT JOIN voucher_lines vl ON vl.voucher_id = v.id
+       WHERE v.business_id = $1
+         AND ($2::date IS NULL OR v.voucher_date >= $2::date)
+         AND ($3::date IS NULL OR v.voucher_date <= $3::date)
+         AND ($4::text IS NULL OR v.voucher_type = $4::voucher_type)
+         AND ($5::text IS NULL OR v.status = $5::voucher_status)
+       GROUP BY v.id
+       ORDER BY v.voucher_date ASC, v.created_at ASC
+       LIMIT $6 OFFSET $7`,
+      [businessId, from || null, to || null, voucherType || null, status || null, Number(limit), Number(offset)]
     );
 
-    res.json(result.rows);
+    res.json(result.rows.map((row) => ({
+      ...row,
+      debitTotal: Number(row.debitTotal || 0),
+      creditTotal: Number(row.creditTotal || 0)
+    })));
   } catch (error) {
     next(error);
   }

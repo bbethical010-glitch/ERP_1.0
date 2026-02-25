@@ -1,93 +1,211 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import { DEMO_BUSINESS_ID } from '../../lib/constants';
+import { DEMO_BUSINESS_ID, VOUCHER_STATUSES, VOUCHER_TYPES } from '../../lib/constants';
 import { usePageKeydown } from '../../hooks/usePageKeydown';
+
+function formatDate(value) {
+  return new Date(value).toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+}
+
+function formatAmount(value) {
+  return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 
 export function VoucherRegisterPanel() {
   const navigate = useNavigate();
-  const { data: vouchers = [] } = useQuery({
-    queryKey: ['vouchers'],
-    queryFn: () => api.get(`/vouchers?businessId=${DEMO_BUSINESS_ID}`)
-  });
-
+  const [search, setSearch] = useState('');
+  const [voucherType, setVoucherType] = useState('');
+  const [status, setStatus] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
 
-  const rows = useMemo(() => vouchers, [vouchers]);
+  const limit = 15;
+  const offset = (page - 1) * limit;
 
-  useEffect(() => {
-    setActiveIndex((idx) => Math.min(idx, Math.max(rows.length - 1, 0)));
-  }, [rows.length]);
+  const { data, isLoading } = useQuery({
+    queryKey: ['vouchers', { search, voucherType, status, from, to, limit, offset }],
+    queryFn: () => {
+      const query = new URLSearchParams({
+        businessId: DEMO_BUSINESS_ID,
+        limit: String(limit),
+        offset: String(offset)
+      });
+      if (search) query.set('search', search);
+      if (voucherType) query.set('voucherType', voucherType);
+      if (status) query.set('status', status);
+      if (from) query.set('from', from);
+      if (to) query.set('to', to);
+      return api.get(`/vouchers?${query.toString()}`);
+    }
+  });
 
-  function openActive() {
+  const rows = useMemo(() => data?.items || [], [data]);
+  const total = data?.page?.total || 0;
+  const pageCount = Math.max(Math.ceil(total / limit), 1);
+
+  const openActive = useCallback(() => {
     if (!rows[activeIndex]) return;
     navigate(`/vouchers/${rows[activeIndex].id}/edit`);
-  }
-
-  const onKeyDown = useCallback((event) => {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault();
-      setActiveIndex((idx) => Math.min(idx + 1, Math.max(rows.length - 1, 0)));
-      return;
-    }
-
-    if (event.key === 'ArrowUp') {
-      event.preventDefault();
-      setActiveIndex((idx) => Math.max(idx - 1, 0));
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      openActive();
-      return;
-    }
-
-    if (event.key.toLowerCase() === 'n') {
-      event.preventDefault();
-      navigate('/vouchers/new');
-    }
   }, [activeIndex, navigate, rows]);
+
+  const onKeyDown = useCallback(
+    (event) => {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault();
+        setActiveIndex((idx) => Math.min(idx + 1, Math.max(rows.length - 1, 0)));
+        return;
+      }
+
+      if (event.key === 'ArrowUp') {
+        event.preventDefault();
+        setActiveIndex((idx) => Math.max(idx - 1, 0));
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        openActive();
+        return;
+      }
+
+      if (event.key.toLowerCase() === 'n') {
+        event.preventDefault();
+        navigate('/vouchers/new');
+      }
+    },
+    [navigate, openActive, rows.length]
+  );
 
   usePageKeydown(onKeyDown);
 
   return (
-    <section className="boxed shadow-panel focusable" tabIndex={0}>
+    <section className="boxed shadow-panel">
       <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">Voucher Register</div>
-      <table className="w-full table-grid text-sm">
-        <thead className="bg-tally-tableHeader">
-          <tr>
-            <th className="text-left">Date</th>
-            <th className="text-left">Type</th>
-            <th className="text-left">No.</th>
-            <th className="text-left">Status</th>
-            <th className="text-left">Narration</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((voucher, idx) => (
-            <tr
-              key={voucher.id}
-              className={idx === activeIndex ? 'bg-tally-background' : ''}
-              onClick={() => navigate(`/vouchers/${voucher.id}/edit`)}
-              onMouseEnter={() => setActiveIndex(idx)}
-            >
-              <td>{voucher.voucherDate}</td>
-              <td>{voucher.voucherType}</td>
-              <td>{voucher.voucherNumber}</td>
-              <td>{voucher.isReversed ? 'Reversed' : 'Posted'}</td>
-              <td>{voucher.narration || '-'}</td>
-            </tr>
+
+      <div className="p-3 grid gap-2 md:grid-cols-6 text-sm">
+        <input
+          className="focusable border border-tally-panelBorder p-1 bg-white md:col-span-2"
+          placeholder="Search voucher no / narration"
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setPage(1);
+          }}
+        />
+        <select
+          className="focusable border border-tally-panelBorder p-1 bg-white"
+          value={voucherType}
+          onChange={(e) => {
+            setVoucherType(e.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All Types</option>
+          {VOUCHER_TYPES.map((type) => (
+            <option key={type} value={type}>{type}</option>
           ))}
-          {rows.length === 0 && (
+        </select>
+        <select
+          className="focusable border border-tally-panelBorder p-1 bg-white"
+          value={status}
+          onChange={(e) => {
+            setStatus(e.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All Status</option>
+          {VOUCHER_STATUSES.map((item) => (
+            <option key={item} value={item}>{item}</option>
+          ))}
+        </select>
+        <input
+          type="date"
+          className="focusable border border-tally-panelBorder p-1 bg-white"
+          value={from}
+          onChange={(e) => {
+            setFrom(e.target.value);
+            setPage(1);
+          }}
+        />
+        <input
+          type="date"
+          className="focusable border border-tally-panelBorder p-1 bg-white"
+          value={to}
+          onChange={(e) => {
+            setTo(e.target.value);
+            setPage(1);
+          }}
+        />
+      </div>
+
+      <div className="max-h-[420px] overflow-auto">
+        <table className="w-full table-grid text-sm">
+          <thead className="bg-tally-tableHeader sticky top-0 z-10">
             <tr>
-              <td colSpan={5} className="text-center py-3">No vouchers found. Press N or ⌥C to create.</td>
+              <th className="text-left">Date</th>
+              <th className="text-left">Voucher No</th>
+              <th className="text-left">Type</th>
+              <th className="text-left">Status</th>
+              <th className="text-right">Amount</th>
+              <th className="text-left">Narration</th>
             </tr>
-          )}
-        </tbody>
-      </table>
-      <div className="p-2 text-xs">Arrow keys to navigate | Enter to edit | N to create new</div>
+          </thead>
+          <tbody>
+            {rows.map((voucher, idx) => (
+              <tr
+                key={voucher.id}
+                className={`${idx === activeIndex ? 'bg-tally-background' : ''} hover:bg-tally-background cursor-pointer`}
+                onClick={() => navigate(`/vouchers/${voucher.id}/edit`)}
+                onMouseEnter={() => setActiveIndex(idx)}
+              >
+                <td>{formatDate(voucher.voucherDate)}</td>
+                <td>{voucher.voucherNumber}</td>
+                <td>{voucher.voucherType}</td>
+                <td>{voucher.status}</td>
+                <td className="text-right">₹ {formatAmount(voucher.grossAmount)}</td>
+                <td>{voucher.narration || '-'}</td>
+              </tr>
+            ))}
+
+            {!isLoading && rows.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-center py-3">No vouchers found.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="p-3 flex items-center justify-between text-xs">
+        <span>Showing {rows.length} of {total}</span>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            className="focusable boxed px-2 py-1"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(p - 1, 1))}
+          >
+            Prev
+          </button>
+          <span>Page {page} / {pageCount}</span>
+          <button
+            type="button"
+            className="focusable boxed px-2 py-1"
+            disabled={page >= pageCount}
+            onClick={() => setPage((p) => Math.min(p + 1, pageCount))}
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </section>
   );
 }

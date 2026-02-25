@@ -49,9 +49,12 @@ Open these URLs:
 
 ## Notes
 
-- Financial posting is server-side (`backend/src/modules/vouchers/service.js`).
-- Database trigger rejects unbalanced transactions at commit time.
-- Posted vouchers are immutable; corrections are done by reversal voucher posting.
-- Audit logs are stored in `audit_logs` for voucher create/reversal operations.
+- Financial posting engine is server-side (`backend/src/modules/vouchers/service.js`).
+- Voucher lifecycle: `DRAFT -> POSTED -> REVERSED` and `DRAFT -> CANCELLED`.
+- Posted vouchers are immutable; corrections are done by reversal posting.
+- Reports are generated from `ledger_postings` and grouped by account category/group.
+- Dashboard is data-driven (`/api/v1/dashboard/summary`) with KPI cards, alerts, and recent vouchers.
+- Database includes normalized tables for `voucher_lines`, `ledger_postings`, and `financial_years`.
+- Audit logs are stored in `audit_logs` for voucher lifecycle events.
 - Tally palette is defined in `frontend/src/styles/theme.js`.
 - Demo business ID is fixed as `00000000-0000-0000-0000-000000000001`.

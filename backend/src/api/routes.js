@@ -6,6 +6,7 @@ import { daybookRouter } from '../modules/daybook/routes.js';
 import { ledgerRouter } from '../modules/ledger/routes.js';
 import { authRouter } from '../modules/auth/routes.js';
 import { requireAuth } from '../middleware/requireAuth.js';
+import { dashboardRouter } from '../modules/dashboard/routes.js';
 
 export const apiRouter = Router();
 
@@ -21,3 +22,4 @@ apiRouter.use('/vouchers', vouchersRouter);
 apiRouter.use('/reports', reportsRouter);
 apiRouter.use('/daybook', daybookRouter);
 apiRouter.use('/ledger', ledgerRouter);
+apiRouter.use('/dashboard', dashboardRouter);

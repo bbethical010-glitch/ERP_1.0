@@ -1,17 +1,26 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createVoucher, deleteVoucher, getVoucherById, reverseVoucher, updateVoucher } from './service.js';
-import { pool } from '../../db/pool.js';
+import {
+  cancelVoucher,
+  createVoucher,
+  deleteVoucher,
+  getVoucherById,
+  listVouchers,
+  postVoucher,
+  reverseVoucher,
+  updateVoucher
+} from './service.js';
 import { httpError } from '../../utils/httpError.js';
 
 export const vouchersRouter = Router();
 
 const voucherSchema = z.object({
   businessId: z.string().uuid(),
-  voucherType: z.enum(['JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE']),
-  voucherNumber: z.string().min(1),
+  voucherType: z.enum(['JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE', 'CONTRA']),
+  voucherNumber: z.string().min(1).optional(),
   voucherDate: z.string().date(),
   narration: z.string().optional(),
+  mode: z.enum(['DRAFT', 'POST']).optional(),
   actorId: z.string().optional(),
   entries: z
     .array(
@@ -26,10 +35,28 @@ const voucherSchema = z.object({
 
 const reversalSchema = z.object({
   businessId: z.string().uuid(),
-  reversalVoucherNumber: z.string().min(1),
+  reversalVoucherNumber: z.string().min(1).optional(),
   reversalDate: z.string().date().optional(),
   narration: z.string().optional(),
   actorId: z.string().optional()
+});
+
+const lifecycleSchema = z.object({
+  businessId: z.string().uuid(),
+  actorId: z.string().optional(),
+  voucherType: z.enum(['JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE', 'CONTRA']).optional(),
+  voucherNumber: z.string().min(1).optional(),
+  voucherDate: z.string().date().optional(),
+  narration: z.string().optional(),
+  entries: z
+    .array(
+      z.object({
+        accountId: z.string().uuid(),
+        entryType: z.enum(['DR', 'CR']),
+        amount: z.number().positive()
+      })
+    )
+    .optional()
 });
 
 vouchersRouter.post('/', async (req, res, next) => {
@@ -47,31 +74,24 @@ vouchersRouter.post('/', async (req, res, next) => {
 
 vouchersRouter.get('/', async (req, res, next) => {
   try {
-    const businessId = req.query.businessId;
-    const from = req.query.from;
-    const to = req.query.to;
+    const { businessId, from, to, voucherType, status, search, limit, offset } = req.query;
 
     if (!businessId) {
       throw httpError(400, 'businessId query parameter is required');
     }
 
-    const result = await pool.query(
-      `SELECT v.id, v.voucher_type AS "voucherType", v.voucher_number AS "voucherNumber",
-              v.voucher_date AS "voucherDate", v.narration,
-              v.is_reversed AS "isReversed",
-              v.reversed_by_voucher_id AS "reversedByVoucherId",
-              v.reversed_from_voucher_id AS "reversedFromVoucherId",
-              t.id AS "transactionId", t.txn_date AS "transactionDate"
-       FROM vouchers v
-       JOIN transactions t ON t.id = v.transaction_id
-       WHERE v.business_id = $1
-         AND ($2::date IS NULL OR v.voucher_date >= $2::date)
-         AND ($3::date IS NULL OR v.voucher_date <= $3::date)
-       ORDER BY v.voucher_date DESC, v.created_at DESC`,
-      [businessId, from || null, to || null]
-    );
+    const result = await listVouchers({
+      businessId,
+      from,
+      to,
+      voucherType,
+      status,
+      search,
+      limit,
+      offset
+    });
 
-    res.json(result.rows);
+    res.json(result);
   } catch (error) {
     next(error);
   }
@@ -87,6 +107,32 @@ vouchersRouter.get('/:voucherId', async (req, res, next) => {
     const voucher = await getVoucherById(req.params.voucherId, businessId);
     res.json(voucher);
   } catch (error) {
+    next(error);
+  }
+});
+
+vouchersRouter.post('/:voucherId/post', async (req, res, next) => {
+  try {
+    const payload = lifecycleSchema.parse(req.body);
+    const result = await postVoucher(req.params.voucherId, payload);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(httpError(400, 'Invalid post payload', error.issues));
+    }
+    next(error);
+  }
+});
+
+vouchersRouter.post('/:voucherId/cancel', async (req, res, next) => {
+  try {
+    const payload = lifecycleSchema.parse(req.body);
+    const result = await cancelVoucher(req.params.voucherId, payload);
+    res.json(result);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(httpError(400, 'Invalid cancel payload', error.issues));
+    }
     next(error);
   }
 });
