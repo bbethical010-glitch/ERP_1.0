@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { DEMO_BUSINESS_ID } from '../../lib/constants';
+import { usePageKeydown } from '../../hooks/usePageKeydown';
 
 export function VoucherRegisterPanel() {
   const navigate = useNavigate();
@@ -15,12 +16,16 @@ export function VoucherRegisterPanel() {
 
   const rows = useMemo(() => vouchers, [vouchers]);
 
+  useEffect(() => {
+    setActiveIndex((idx) => Math.min(idx, Math.max(rows.length - 1, 0)));
+  }, [rows.length]);
+
   function openActive() {
     if (!rows[activeIndex]) return;
     navigate(`/vouchers/${rows[activeIndex].id}/edit`);
   }
 
-  function onKeyDown(event) {
+  const onKeyDown = useCallback((event) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setActiveIndex((idx) => Math.min(idx + 1, Math.max(rows.length - 1, 0)));
@@ -43,10 +48,12 @@ export function VoucherRegisterPanel() {
       event.preventDefault();
       navigate('/vouchers/new');
     }
-  }
+  }, [activeIndex, navigate, rows]);
+
+  usePageKeydown(onKeyDown);
 
   return (
-    <section className="boxed shadow-panel focusable" tabIndex={0} autoFocus onKeyDown={onKeyDown}>
+    <section className="boxed shadow-panel focusable" tabIndex={0}>
       <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">Voucher Register</div>
       <table className="w-full table-grid text-sm">
         <thead className="bg-tally-tableHeader">

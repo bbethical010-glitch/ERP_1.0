@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { usePageKeydown } from '../../hooks/usePageKeydown';
 
 const menuItems = [
   { label: 'Voucher Register', hotkey: 'V', path: '/vouchers' },
@@ -32,7 +33,7 @@ export function GatewayMenu() {
     []
   );
 
-  function onKeyDown(event) {
+  const onKeyDown = useCallback((event) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       setActiveIndex((i) => (i + 1) % menuItems.length);
@@ -56,10 +57,12 @@ export function GatewayMenu() {
       event.preventDefault();
       navigate(hotkeyMap[key]);
     }
-  }
+  }, [activeIndex, hotkeyMap, navigate]);
+
+  usePageKeydown(onKeyDown);
 
   return (
-    <section className="boxed shadow-panel max-w-3xl focusable" tabIndex={0} autoFocus onKeyDown={onKeyDown}>
+    <section className="boxed shadow-panel max-w-3xl focusable" tabIndex={0}>
       <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">Gateway of Tally</div>
       <div className="grid md:grid-cols-[2fr_1fr]">
         <ul className="m-0 p-0 list-none">
