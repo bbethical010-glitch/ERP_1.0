@@ -1,0 +1,18 @@
+{
+  "name": "accounting-erp-tally",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace backend",
+    "dev:frontend": "npm run dev --workspace frontend",
+    "dev:backend": "npm run dev --workspace backend",
+    "db:schema": "npm run db:schema --workspace backend",
+    "db:seed:demo": "npm run db:seed:demo --workspace backend",
+    "build": "npm run build --workspace frontend && npm run build --workspace backend",
+    "start": "npm run start --workspace backend"
+  }
+}
