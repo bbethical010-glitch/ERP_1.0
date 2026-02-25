@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", Verdana, sans-serif;
+  background: #e1f2f0;
+  color: #0f2f2a;
+}
+
+.hotkey {
+  color: #1b4f48;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+.boxed {
+  border: 1px solid #5b8f88;
+  background: #f3faf9;
+}
+
+.table-grid td,
+.table-grid th {
+  border: 1px solid #6e9d96;
+  padding: 0.35rem 0.5rem;
+}
+
+.focusable:focus {
+  outline: 2px solid #1b4f48;
+  outline-offset: 1px;
+}

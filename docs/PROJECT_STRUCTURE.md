@@ -18,6 +18,7 @@
 │       ├── pages/                     # Route-level pages
 │       └── styles/                    # Tailwind + theme tokens
 ├── backend/                           # Node.js + Fastify/Express
+│   ├── scripts/                       # SQL bootstrap runner scripts
 │   └── src/
 │       ├── api/                       # Route registration, middleware
 │       ├── db/                        # PG pool, migrations, repositories
@@ -30,7 +31,8 @@
 │       ├── services/                  # Server-side financial logic
 │       └── utils/                     # Shared backend helpers
 ├── db/
-│   └── schema.sql                     # Double-entry schema + constraints/triggers
+│   ├── schema.sql                     # Double-entry schema + constraints/triggers
+│   └── seed_demo.sql                  # Demo business + CoA + starter ledgers
 └── docs/
     └── PROJECT_STRUCTURE.md
 ```

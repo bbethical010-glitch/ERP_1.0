@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "build": "echo 'No build step for backend'"
+    "build": "echo 'No build step for backend'",
+    "db:schema": "node scripts/run-sql.js ../../db/schema.sql",
+    "db:seed:demo": "node scripts/run-sql.js ../../db/seed_demo.sql"
   },
   "dependencies": {
     "cors": "^2.8.5",
