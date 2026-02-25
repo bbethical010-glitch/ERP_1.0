@@ -24,6 +24,12 @@ export function useGlobalShortcuts(handlers) {
         handlers.onUsers();
       }
 
+      const passwordPressed = !typing && event.altKey && key === 'p';
+      if (passwordPressed && handlers.onPassword) {
+        event.preventDefault();
+        handlers.onPassword();
+      }
+
       if (!typing && event.key === 'Escape' && handlers.onBack) {
         event.preventDefault();
         handlers.onBack();

@@ -30,6 +30,12 @@ const registerSchema = createUserSchema.extend({
   ownerPassword: z.string().min(1)
 });
 
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(6).max(128)
+});
+
+
 function normalizeUsername(username) {
   return String(username || '')
     .trim()
@@ -175,6 +181,58 @@ authRouter.get('/me', requireAuth, (req, res) => {
     role: req.user.role,
     businessId: req.user.businessId || DEFAULT_BUSINESS_ID
   });
+});
+
+authRouter.post('/change-password', requireAuth, async (req, res, next) => {
+  try {
+    const payload = changePasswordSchema.parse(req.body);
+    if (payload.currentPassword === payload.newPassword) {
+      throw httpError(400, 'New password must be different from current password');
+    }
+
+    const businessId = req.user.businessId || DEFAULT_BUSINESS_ID;
+
+    let result = await pool.query(
+      `SELECT id, password_hash AS "passwordHash"
+       FROM app_users
+       WHERE id = $1 AND business_id = $2
+       LIMIT 1`,
+      [req.user.sub, businessId]
+    );
+
+    // Backward compatibility: token may have legacy "sub=username".
+    if (result.rows.length === 0 && req.user.username) {
+      result = await pool.query(
+        `SELECT id, password_hash AS "passwordHash"
+         FROM app_users
+         WHERE LOWER(username) = LOWER($1) AND business_id = $2
+         LIMIT 1`,
+        [req.user.username, businessId]
+      );
+    }
+
+    if (result.rows.length === 0) {
+      throw httpError(404, 'User not found');
+    }
+
+    const dbUser = result.rows[0];
+    if (!verifyPassword(payload.currentPassword, dbUser.passwordHash)) {
+      throw httpError(401, 'Current password is incorrect');
+    }
+
+    const passwordHash = hashPassword(payload.newPassword);
+    await pool.query(`UPDATE app_users SET password_hash = $1, updated_at = NOW() WHERE id = $2`, [
+      passwordHash,
+      dbUser.id
+    ]);
+
+    res.json({ ok: true, message: 'Password changed successfully' });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return next(httpError(400, 'Invalid password payload', error.issues));
+    }
+    next(error);
+  }
 });
 
 authRouter.get('/users', requireAuth, async (req, res, next) => {
