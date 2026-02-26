@@ -1,0 +1,72 @@
+{
+    "global": {
+        "openCommandPalette": [
+            "ctrl+k",
+            "alt+g"
+        ],
+        "goBack": [
+            "alt+arrowleft"
+        ],
+        "focusSearch": [
+            "/",
+            "ctrl+f"
+        ]
+    },
+    "gateway": {
+        "openPaymentVoucher": [
+            "1"
+        ],
+        "openReceiptVoucher": [
+            "2"
+        ],
+        "openSalesVoucher": [
+            "3"
+        ],
+        "openPurchaseVoucher": [
+            "4"
+        ],
+        "openJournalVoucher": [
+            "5"
+        ],
+        "openContraVoucher": [
+            "6"
+        ]
+    },
+    "voucher": {
+        "post": [
+            "ctrl+enter"
+        ],
+        "cancel": [
+            "escape"
+        ],
+        "duplicateLine": [
+            "ctrl+d"
+        ],
+        "repeatLast": [
+            "alt+r"
+        ],
+        "configure": [
+            "f12"
+        ],
+        "selectCompany": [
+            "f1"
+        ]
+    },
+    "table": {
+        "moveUp": [
+            "arrowup"
+        ],
+        "moveDown": [
+            "arrowdown"
+        ],
+        "open": [
+            "enter"
+        ],
+        "select": [
+            " "
+        ],
+        "reverse": [
+            "r"
+        ]
+    }
+}

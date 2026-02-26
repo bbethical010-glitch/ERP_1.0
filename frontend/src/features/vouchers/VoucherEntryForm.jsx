@@ -3,8 +3,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { VOUCHER_TYPES } from '../../lib/constants';
-import { useGlobalShortcuts } from '../../hooks/useGlobalShortcuts';
 import { useAuth } from '../../auth/AuthContext';
+import { LedgerSearch } from '../../components/LedgerSearch';
+import { useKeyboardHandler } from '../../providers/KeyboardProvider';
+import { announceToScreenReader } from '../../hooks/useFocusUtilities';
 
 const emptyLine = { accountId: '', entryType: 'DR', amount: '' };
 
@@ -41,7 +43,7 @@ export function VoucherEntryForm({ voucherId }) {
   const voucherTypeRef = useRef(null);
   const voucherDateRef = useRef(null);
   const narrationRef = useRef(null);
-  const ledgerSearchRef = useRef(null);
+  const firstLedgerRef = useRef(null);
 
   const isEditMode = Boolean(voucherId);
 
@@ -73,21 +75,9 @@ export function VoucherEntryForm({ voucherId }) {
     setReversalNumber(`RV-${existingVoucher.voucherNumber || '0001'}`);
   }, [existingVoucher]);
 
-  const canEdit = !isEditMode || existingVoucher?.status === 'DRAFT';
   const isPosted = isEditMode && existingVoucher?.status === 'POSTED';
   const isReversed = isEditMode && existingVoucher?.status === 'REVERSED';
   const isCancelled = isEditMode && existingVoucher?.status === 'CANCELLED';
-
-  const filteredAccounts = useMemo(() => {
-    if (!ledgerSearch.trim()) return accounts;
-    const q = ledgerSearch.toLowerCase();
-    return accounts.filter(
-      (account) =>
-        account.name.toLowerCase().includes(q) ||
-        account.code.toLowerCase().includes(q) ||
-        String(account.groupName || '').toLowerCase().includes(q)
-    );
-  }, [accounts, ledgerSearch]);
 
   const totals = useMemo(() => computeTotals(entries), [entries]);
 
@@ -178,16 +168,20 @@ export function VoucherEntryForm({ voucherId }) {
   function validateLines() {
     if (entries.length < 2) {
       setLineError('At least 2 ledger lines required');
+      announceToScreenReader('Error: At least 2 ledger lines required');
       return false;
     }
 
-    for (const line of entries) {
+    for (let i = 0; i < entries.length; i++) {
+      const line = entries[i];
       if (!line.accountId) {
-        setLineError('All lines must have a ledger account');
+        setLineError(`Line ${i + 1} must have a ledger account`);
+        announceToScreenReader(`Error: Line ${i + 1} must have a ledger account`);
         return false;
       }
       if (!Number.isFinite(Number(line.amount)) || Number(line.amount) <= 0) {
-        setLineError('All lines must have amount greater than zero');
+        setLineError(`Line ${i + 1} must have an amount greater than zero`);
+        announceToScreenReader(`Error: Line ${i + 1} must have an amount greater than zero`);
         return false;
       }
     }
@@ -233,8 +227,28 @@ export function VoucherEntryForm({ voucherId }) {
     createOrSaveDraft.mutate('POST');
   }
 
-  useGlobalShortcuts({
-    onSave: postNow
+  useKeyboardHandler('voucher', (event, keyString, isInput) => {
+    if (keyString === 'ctrl+enter') {
+      event.preventDefault();
+      postNow();
+      return true;
+    }
+    if (keyString === 'ctrl+d' && isInput) {
+      event.preventDefault();
+      addLine();
+      return true;
+    }
+    if (keyString === 'alt+r') {
+      event.preventDefault();
+      announceToScreenReader('Repeat last voucher not implemented');
+      return true;
+    }
+    if (keyString === 'f12') {
+      event.preventDefault();
+      announceToScreenReader('Voucher configuration not implemented');
+      return true;
+    }
+    return false;
   });
 
   function onFormKeyDown(event) {
@@ -259,12 +273,6 @@ export function VoucherEntryForm({ voucherId }) {
     if (event.altKey && event.key === '3') {
       event.preventDefault();
       narrationRef.current?.focus();
-      return;
-    }
-
-    if (event.altKey && event.key.toLowerCase() === 'l') {
-      event.preventDefault();
-      ledgerSearchRef.current?.focus();
       return;
     }
 
@@ -336,17 +344,6 @@ export function VoucherEntryForm({ voucherId }) {
             onChange={(e) => setNarration(e.target.value)}
           />
         </label>
-
-        <label className="flex flex-col gap-1 md:col-span-2">
-          Ledger Search
-          <input
-            ref={ledgerSearchRef}
-            className="focusable border border-tally-panelBorder bg-white p-1"
-            placeholder="Type ledger/group"
-            value={ledgerSearch}
-            onChange={(e) => setLedgerSearch(e.target.value)}
-          />
-        </label>
       </div>
 
       <table className="w-full table-grid text-sm">
@@ -364,17 +361,12 @@ export function VoucherEntryForm({ voucherId }) {
             return (
               <tr key={idx} className={!totals.isBalanced && ((totals.difference > 0 && line.entryType === 'DR') || (totals.difference < 0 && line.entryType === 'CR')) ? 'bg-red-50' : ''}>
                 <td>
-                  <select
-                    disabled={!canEdit}
-                    className="focusable w-full border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
-                    value={line.accountId}
-                    onChange={(e) => updateLine(idx, 'accountId', e.target.value)}
-                  >
-                    <option value="">Select account</option>
-                    {filteredAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>{account.code} - {account.name}</option>
-                    ))}
-                  </select>
+                  <LedgerSearch
+                    businessId={businessId}
+                    autoFocus={idx === 0}
+                    value={selected}
+                    onChange={(ledger) => updateLine(idx, 'accountId', ledger?.id || '')}
+                  />
                 </td>
                 <td>{selected?.groupName || '-'}</td>
                 <td>

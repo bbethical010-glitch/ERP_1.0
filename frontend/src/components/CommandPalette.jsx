@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusTrap, useRoamingTabIndex } from '../hooks/useFocusUtilities';
 
 function normalize(text) {
   return String(text || '').trim().toLowerCase();
@@ -6,8 +7,9 @@ function normalize(text) {
 
 export function CommandPalette({ open, commands, onClose, onNavigate }) {
   const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef(null);
+
+  const containerRef = useFocusTrap(open);
 
   const filtered = useMemo(() => {
     const q = normalize(query);
@@ -18,12 +20,14 @@ export function CommandPalette({ open, commands, onClose, onNavigate }) {
     });
   }, [commands, query]);
 
+  const { activeIndex, setActiveIndex, onKeyDown: roamingKeyDown } = useRoamingTabIndex(filtered.length);
+
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setActiveIndex(0);
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [open]);
+  }, [open, setActiveIndex]);
 
   useEffect(() => {
     if (!open) return;
@@ -35,15 +39,8 @@ export function CommandPalette({ open, commands, onClose, onNavigate }) {
         return;
       }
 
-      if (event.key === 'ArrowDown') {
-        event.preventDefault();
-        setActiveIndex((idx) => Math.min(idx + 1, Math.max(filtered.length - 1, 0)));
-        return;
-      }
-
-      if (event.key === 'ArrowUp') {
-        event.preventDefault();
-        setActiveIndex((idx) => Math.max(idx - 1, 0));
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        roamingKeyDown(event);
         return;
       }
 
@@ -56,14 +53,15 @@ export function CommandPalette({ open, commands, onClose, onNavigate }) {
       }
     }
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeIndex, filtered, onClose, onNavigate, open]);
+    // Attach to the document so it catches even if input is off focus within trap
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [activeIndex, filtered, onClose, onNavigate, open, roamingKeyDown]);
 
   if (!open) return null;
 
   return (
-    <div className="command-overlay" role="dialog" aria-modal="true" aria-label="Go To Command Palette">
+    <div ref={containerRef} className="command-overlay" role="dialog" aria-modal="true" aria-label="Go To Command Palette">
       <div className="boxed shadow-panel command-palette">
         <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">
           Go To (Cmd/Ctrl+K)
@@ -87,7 +85,8 @@ export function CommandPalette({ open, commands, onClose, onNavigate }) {
                 <li key={command.id}>
                   <button
                     type="button"
-                    className={`focusable command-item ${index === activeIndex ? 'command-item-active' : ''}`}
+                    tabIndex="-1"
+                    className={`focusable command-item ${index === activeIndex ? 'bg-tally-rowHover command-item-active' : ''}`}
                     onMouseEnter={() => setActiveIndex(index)}
                     onClick={() => onNavigate(command.path)}
                   >

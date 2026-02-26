@@ -134,12 +134,12 @@ export function ProfitLossPanel() {
   return (
     <Panel title="Profit & Loss">
       <PeriodFilter from={from} to={to} setFrom={setFrom} setTo={setTo} />
-      <div className="grid gap-2">
-        <div className="boxed p-2 flex justify-between"><span>Revenue</span><span>₹ {formatAmount(data?.income)}</span></div>
-        <div className="boxed p-2 flex justify-between"><span>Expenses</span><span>₹ {formatAmount(data?.expense)}</span></div>
-        <div className="boxed p-2 flex justify-between"><span>Gross Profit</span><span>₹ {formatAmount(data?.grossProfit)}</span></div>
-        <div className="boxed p-2 flex justify-between"><span>Operating Profit</span><span>₹ {formatAmount(data?.operatingProfit)}</span></div>
-        <div className="boxed p-2 flex justify-between font-semibold"><span>Net Profit</span><span>₹ {formatAmount(data?.netProfit)}</span></div>
+      <div className="grid gap-2" role="listbox">
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Revenue</span><span>₹ {formatAmount(data?.income)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Expenses</span><span>₹ {formatAmount(data?.expense)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Gross Profit</span><span>₹ {formatAmount(data?.grossProfit)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Operating Profit</span><span>₹ {formatAmount(data?.operatingProfit)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between font-semibold hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Net Profit</span><span>₹ {formatAmount(data?.netProfit)}</span></div>
       </div>
 
       <div className="boxed mt-3 p-2">
@@ -168,12 +168,12 @@ export function BalanceSheetPanel() {
   return (
     <Panel title="Balance Sheet">
       <PeriodFilter from={from} to={to} setFrom={setFrom} setTo={setTo} />
-      <div className="grid gap-2">
-        <div className="boxed p-2 flex justify-between"><span>Total Assets</span><span>₹ {formatAmount(data?.assets)}</span></div>
-        <div className="boxed p-2 flex justify-between"><span>Total Liabilities</span><span>₹ {formatAmount(data?.liabilities)}</span></div>
-        <div className="boxed p-2 flex justify-between"><span>Equity (incl. retained earnings)</span><span>₹ {formatAmount(data?.equity)}</span></div>
-        <div className="boxed p-2 flex justify-between"><span>Retained Earnings</span><span>₹ {formatAmount(data?.retainedEarnings)}</span></div>
-        <div className="boxed p-2 flex justify-between font-semibold"><span>Liabilities + Equity</span><span>₹ {formatAmount(data?.liabilitiesAndEquity)}</span></div>
+      <div className="grid gap-2" role="listbox">
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Total Assets</span><span>₹ {formatAmount(data?.assets)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Total Liabilities</span><span>₹ {formatAmount(data?.liabilities)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Equity (incl. retained earnings)</span><span>₹ {formatAmount(data?.equity)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Retained Earnings</span><span>₹ {formatAmount(data?.retainedEarnings)}</span></div>
+        <div className="focusable boxed p-2 flex justify-between font-semibold hover:bg-tally-rowHover hover:text-white" tabIndex={0}><span>Liabilities + Equity</span><span>₹ {formatAmount(data?.liabilitiesAndEquity)}</span></div>
       </div>
 
       {Math.abs(Number(data?.equationDifference || 0)) > 0.01 && (

@@ -5,6 +5,8 @@ import { api } from '../../lib/api';
 import { useAuth } from '../../auth/AuthContext';
 import { getGatewaySections, VOUCHER_QUICK_ACTIONS } from '../../lib/navigation';
 import { usePageKeydown } from '../../hooks/usePageKeydown';
+import { useRoamingTabIndex, announceToScreenReader } from '../../hooks/useFocusUtilities';
+import keybindings from '../../config/keybindings.json';
 
 function formatAmount(value) {
   return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -30,12 +32,73 @@ export function GatewayMenu() {
     queryFn: () => api.get(`/dashboard/summary?asOf=${today}`)
   });
 
+  const recent = data?.recentVouchers || [];
+  const { activeIndex: tableIndex, setActiveIndex: setTableIndex, onKeyDown: roamingKeyDown } = useRoamingTabIndex(recent.length, -1);
+  const tableContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (tableIndex >= 0 && tableContainerRef.current) {
+      const rows = tableContainerRef.current.querySelectorAll('tbody tr');
+      if (rows[tableIndex]) {
+        rows[tableIndex].scrollIntoView({ block: 'nearest' });
+      }
+    }
+  }, [tableIndex]);
+
   useEffect(() => {
     const key = itemKey(activeCell.sectionIndex, activeCell.itemIndex);
     itemRefs.current[key]?.focus();
   }, [activeCell]);
 
   usePageKeydown((event) => {
+    // Prevent interfering with inputs
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') return;
+
+    // Numeric shortcuts for Quick Vouchers
+    const keyString = event.key.toLowerCase();
+
+    // Quick Map
+    const quickMap = {
+      '1': '/vouchers/payment/new',
+      '2': '/vouchers/receipt/new',
+      '3': '/vouchers/sales/new',
+      '4': '/vouchers/purchase/new',
+      '5': '/vouchers/journal/new',
+      '6': '/vouchers/contra/new',
+    };
+
+    if (quickMap[keyString]) {
+      event.preventDefault();
+      navigate(quickMap[keyString]);
+      return;
+    }
+
+    // Specific Table Navigation if focus is on table area or table index is active
+    if (recent.length > 0 && (tableIndex >= 0 || event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+        roamingKeyDown(event);
+        return;
+      }
+
+      if (tableIndex >= 0) {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          navigate(`/vouchers/${recent[tableIndex].id}/edit`);
+          return;
+        }
+
+        if (event.key.toLowerCase() === 'r') {
+          event.preventDefault();
+          if (window.confirm('Do you want to reverse this voucher?')) {
+            announceToScreenReader('Reversing voucher is not implemented yet.');
+            // API call to reverse voucher
+          }
+          return;
+        }
+      }
+    }
+
+
     if (event.altKey) {
       const key = event.key.toLowerCase();
       const match = gatewaySections
@@ -88,10 +151,26 @@ export function GatewayMenu() {
 
     if (event.key === 'Enter') {
       event.preventDefault();
-      const target = section.items[activeCell.itemIndex];
-      if (target) navigate(target.path);
+      // Ensure we're not interfering with table selection
+      if (tableIndex < 0) {
+        const target = section.items[activeCell.itemIndex];
+        if (target) navigate(target.path);
+      }
     }
   });
+
+  useEffect(() => {
+    if (alerts && Object.keys(alerts).length > 0) {
+      const issues = [];
+      if (alerts.unbalancedDrafts > 0) issues.push(`${alerts.unbalancedDrafts} unbalanced drafts`);
+      if (alerts.negativeCashLedgers > 0) issues.push(`${alerts.negativeCashLedgers} negative cash ledgers`);
+      if (alerts.missingLedgerMappings > 0) issues.push(`${alerts.missingLedgerMappings} missing ledger mappings`);
+
+      if (issues.length > 0) {
+        announceToScreenReader(`Alerts updated: ${issues.join(', ')}`);
+      }
+    }
+  }, [alerts]);
 
   if (isLoading) {
     return <div className="boxed shadow-panel p-3 text-sm">Loading gateway dashboard...</div>;
@@ -99,7 +178,6 @@ export function GatewayMenu() {
 
   const kpis = data?.kpis || {};
   const alerts = data?.alerts || {};
-  const recent = data?.recentVouchers || [];
 
   return (
     <div className="grid gap-2">
@@ -168,14 +246,14 @@ export function GatewayMenu() {
         <div className="boxed shadow-panel">
           <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">Quick Create Vouchers</div>
           <div className="p-2 grid gap-1 md:grid-cols-2 text-sm">
-            {VOUCHER_QUICK_ACTIONS.map((action) => (
+            {VOUCHER_QUICK_ACTIONS.map((action, idx) => (
               <button
                 key={action.id}
                 type="button"
-                className="focusable boxed px-2 py-2 text-left hover:bg-tally-tableHeader flex items-center justify-between"
+                className="focusable boxed px-2 py-2 text-left hover:bg-tally-tableHeader focus:bg-tally-tableHeader flex items-center justify-between"
                 onClick={() => navigate(action.path)}
               >
-                <span>{action.label}</span>
+                <span><strong className="text-tally-rowHover underline mr-1">{idx + 1}</strong> {action.label}</span>
                 <span className="hotkey-chip">{action.hotkey}</span>
               </button>
             ))}
@@ -197,12 +275,13 @@ export function GatewayMenu() {
                 <th className="text-left">Narration</th>
               </tr>
             </thead>
-            <tbody>
-              {recent.map((row) => (
+            <tbody ref={tableContainerRef}>
+              {recent.map((row, index) => (
                 <tr
                   key={row.id}
-                  className="hover:bg-tally-background cursor-pointer"
+                  className={`cursor-pointer ${tableIndex === index ? 'bg-tally-rowHover text-white' : 'hover:bg-tally-background'}`}
                   onClick={() => navigate(`/vouchers/${row.id}/edit`)}
+                  onMouseEnter={() => setTableIndex(index)}
                 >
                   <td>{new Date(row.voucherDate).toLocaleDateString('en-IN')}</td>
                   <td>{row.voucherNumber}</td>
