@@ -6,7 +6,7 @@
  * Priority: modal > screen > global.
  */
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
+export const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 
 export const MOD = isMac ? 'meta' : 'ctrl';
 export const MOD_LABEL = isMac ? '⌘' : 'Ctrl';

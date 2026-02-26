@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useViewState, SCREENS } from '../providers/ViewStateProvider';
 import { useAuth } from '../auth/AuthContext';
-import { matchesBinding, normalizeKey, registerKeyHandler, MOD_LABEL } from '../lib/KeyboardManager';
+import { matchesBinding, registerKeyHandler, MOD_LABEL, isMac } from '../lib/KeyboardManager';
 import { CommandPalette } from '../components/CommandPalette';
 import { DatePickerModal } from '../components/DatePickerModal';
 import { ResetConfirmModal } from '../components/ResetConfirmModal';
 import { getCommandCatalog } from '../lib/navigation';
 
-// Screen components (lazy-style but synchronous for simplicity)
+// Screen components
 import { GatewayMenu } from '../features/gateway/GatewayMenu';
 import { LedgerCreateForm } from '../features/ledger/LedgerCreateForm';
 import { VoucherEntryForm } from '../features/vouchers/VoucherEntryForm';
@@ -19,6 +19,15 @@ import { UsersPanel } from '../features/users/UsersPanel';
 import { ChangePasswordPanel } from '../features/users/ChangePasswordPanel';
 import { CompanySetupPanel } from '../features/company/CompanySetupPanel';
 
+/** Helper: shows key combos for both platforms */
+function KeyLabel({ mac, win }) {
+    return <kbd>{isMac ? mac : win}</kbd>;
+}
+
+function DualKey({ mac, win, label }) {
+    return <span><kbd>{isMac ? mac : win}</kbd> {label}</span>;
+}
+
 /**
  * TallyShell — minimal Tally-style application shell.
  * Header bar + screen content. No fat TopBar.
@@ -27,7 +36,6 @@ export function TallyShell() {
     const { current, popScreen, pushScreen, resetToGateway } = useViewState();
     const { user, logout } = useAuth();
     const canManageUsers = user?.role === 'OWNER';
-    const mainRef = useRef(null);
 
     const [paletteOpen, setPaletteOpen] = useState(false);
     const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -63,7 +71,7 @@ export function TallyShell() {
             }
             if (matchesBinding(keyString, 'configure')) {
                 event.preventDefault();
-                return true; // swallow F12
+                return true;
             }
             if (matchesBinding(keyString, 'resetCompany')) {
                 event.preventDefault();
@@ -85,15 +93,9 @@ export function TallyShell() {
         });
     }, [paletteOpen, datePickerOpen, resetModalOpen, pushScreen, popScreen]);
 
-    // Auto-focus main area when screen changes
-    useEffect(() => {
-        requestAnimationFrame(() => mainRef.current?.focus());
-    }, [current.screen]);
-
     // Build command catalog for palette
     const commands = getCommandCatalog(canManageUsers).map((cmd) => ({
         ...cmd,
-        // Replace path-based nav with screen push
         onSelect: () => {
             const screenMap = {
                 '/ledger': SCREENS.LEDGER_LIST,
@@ -186,7 +188,7 @@ export function TallyShell() {
 
     return (
         <div className="min-h-screen bg-tally-background text-tally-text">
-            {/* Minimal Tally header — no buttons, just info */}
+            {/* Minimal Tally header */}
             <header className="bg-tally-header text-white border-b border-tally-panelBorder px-2 py-1 flex items-center justify-between text-xs">
                 <div className="flex items-center gap-2">
                     <span className="font-bold text-sm">{user?.businessName || 'Company'}</span>
@@ -201,9 +203,10 @@ export function TallyShell() {
                     >
                         F2: {displayDate}
                     </button>
-                    <span>{MOD_LABEL}+K GoTo</span>
-                    <span>Esc Back</span>
-                    <span>{MOD_LABEL}+P Print</span>
+                    <DualKey mac="⌘K" win="Ctrl+K" label="GoTo" />
+                    <span><kbd>Esc</kbd> Back</span>
+                    <DualKey mac="⌘P" win="Ctrl+P" label="Print" />
+                    <DualKey mac="⌘R" win="Ctrl+R" label="Reset" />
                     <span className="font-semibold">{user?.displayName || user?.username}</span>
                     <button
                         type="button"
@@ -215,8 +218,8 @@ export function TallyShell() {
                 </div>
             </header>
 
-            {/* Screen content */}
-            <main ref={mainRef} tabIndex={-1} className="p-1 focus:outline-none">
+            {/* Screen content — no mainRef.focus() to avoid stealing focus from panels */}
+            <main className="p-1">
                 {renderScreen()}
             </main>
 
