@@ -52,6 +52,7 @@ reportsRouter.get('/trial-balance', async (req, res, next) => {
     const result = await pool.query(
       `${balanceCte}
        SELECT
+         id AS "accountId",
          code,
          name,
          group_id AS "groupId",

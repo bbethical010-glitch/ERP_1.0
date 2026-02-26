@@ -7,6 +7,7 @@ body {
   font-family: "Trebuchet MS", Verdana, sans-serif;
   background: #e1f2f0;
   color: #0f2f2a;
+  line-height: 1.3;
 }
 
 .hotkey {
@@ -23,10 +24,61 @@ body {
 .table-grid td,
 .table-grid th {
   border: 1px solid #6e9d96;
-  padding: 0.35rem 0.5rem;
+  padding: 0.3rem 0.45rem;
 }
 
-.focusable:focus {
-  outline: 2px solid #1b4f48;
-  outline-offset: 1px;
+.focusable:focus-visible {
+  outline: 2px solid #114f46;
+  outline-offset: 0;
+  box-shadow: 0 0 0 2px #d8efeb inset;
+}
+
+.hotkey-chip {
+  border: 1px solid #5b8f88;
+  background: #dff0ee;
+  color: #0f2f2a;
+  font-size: 0.7rem;
+  padding: 0.05rem 0.35rem;
+}
+
+.command-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 33, 29, 0.38);
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8vh;
+}
+
+.command-palette {
+  width: min(720px, calc(100vw - 1rem));
+}
+
+.command-item {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+  border-bottom: 1px solid #c2dfdb;
+  background: #f3faf9;
+}
+
+.command-item-active {
+  background: #d3ebe7;
+}
+
+.command-main {
+  display: grid;
+  text-align: left;
+  gap: 0.1rem;
+}
+
+.command-hotkey {
+  font-size: 0.7rem;
+  border: 1px solid #5b8f88;
+  padding: 0.05rem 0.35rem;
+  background: #e8f4f2;
 }

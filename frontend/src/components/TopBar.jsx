@@ -1,10 +1,13 @@
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { getRouteLabel } from '../lib/navigation';
 
-export function TopBar() {
+export function TopBar({ onOpenGoTo }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user, logout } = useAuth();
   const canManageUsers = user?.role === 'OWNER';
+  const routeLabel = getRouteLabel(location.pathname);
 
   function onLogout() {
     logout();
@@ -12,11 +15,21 @@ export function TopBar() {
   }
 
   return (
-    <header className="bg-tally-header text-white border-b border-tally-panelBorder px-4 py-2 flex items-center justify-between">
-      <h1 className="text-sm md:text-base font-semibold tracking-wide">Gateway of Tally - Accounting ERP</h1>
-      <div className="flex items-center gap-4 text-xs md:text-sm">
-        <span>⌥C Create | ⌥U Users | ⌥P Password | Esc Back | Return Save | ⌥R Reverse</span>
+    <header className="bg-tally-header text-white border-b border-tally-panelBorder px-3 py-2 flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <h1 className="text-sm md:text-base font-semibold tracking-wide truncate">Gateway of Tally - Accounting ERP</h1>
+        <p className="text-[11px] md:text-xs opacity-90 truncate">Gateway &gt; {routeLabel}</p>
+      </div>
+      <div className="flex items-center gap-3 text-[11px] md:text-xs">
+        <span>⌘/Ctrl+K Go To | ⌥C Create | ⌥M Masters | ⌥T Txns | Esc Back | ⌘/Ctrl+S Save</span>
         <span>{user?.displayName || user?.username}</span>
+        <button
+          type="button"
+          className="focusable border border-white/40 px-2 py-1"
+          onClick={onOpenGoTo}
+        >
+          Go To
+        </button>
         <button
           type="button"
           className="focusable border border-white/40 px-2 py-1"

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAuth } from '../../auth/AuthContext';
@@ -26,6 +27,7 @@ function PeriodFilter({ from, to, setFrom, setTo }) {
 }
 
 export function TrialBalancePanel() {
+  const navigate = useNavigate();
   const { user } = useAuth();
   const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
@@ -73,7 +75,20 @@ export function TrialBalancePanel() {
                   </thead>
                   <tbody>
                     {block.lines.map((line) => (
-                      <tr key={line.code}>
+                      <tr
+                        key={line.accountId || line.code}
+                        className={`${line.accountId ? 'hover:bg-tally-background cursor-pointer' : ''}`}
+                        tabIndex={0}
+                        onClick={() => {
+                          if (line.accountId) navigate(`/ledger?accountId=${line.accountId}`);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' && line.accountId) {
+                            event.preventDefault();
+                            navigate(`/ledger?accountId=${line.accountId}`);
+                          }
+                        }}
+                      >
                         <td>{line.code}</td>
                         <td>{line.name}</td>
                         <td>{line.groupName}</td>
@@ -93,6 +108,7 @@ export function TrialBalancePanel() {
         <span>Totals</span>
         <span>DR {formatAmount(data?.totals?.debit)} | CR {formatAmount(data?.totals?.credit)}</span>
       </div>
+      <p className="text-xs mt-2">Tip: Enter on any ledger row to drill down.</p>
     </Panel>
   );
 }

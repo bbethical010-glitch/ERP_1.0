@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAuth } from '../../auth/AuthContext';
@@ -10,11 +10,30 @@ function formatAmount(value) {
 
 export function LedgerPanel() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const businessId = user?.businessId;
-  const [accountId, setAccountId] = useState('');
+  const [accountId, setAccountId] = useState(searchParams.get('accountId') || '');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
+
+  useEffect(() => {
+    const accountFromQuery = searchParams.get('accountId') || '';
+    if (accountFromQuery !== accountId) {
+      setAccountId(accountFromQuery);
+    }
+  }, [accountId, searchParams]);
+
+  function onAccountChange(nextAccountId) {
+    setAccountId(nextAccountId);
+    const next = new URLSearchParams(searchParams);
+    if (nextAccountId) {
+      next.set('accountId', nextAccountId);
+    } else {
+      next.delete('accountId');
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts', businessId],
@@ -39,7 +58,7 @@ export function LedgerPanel() {
     <section className="boxed shadow-panel">
       <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold">Ledger Display</div>
       <div className="p-3 grid gap-2 md:grid-cols-4 text-sm">
-        <select className="focusable border border-tally-panelBorder bg-white p-1" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+        <select className="focusable border border-tally-panelBorder bg-white p-1" value={accountId} onChange={(e) => onAccountChange(e.target.value)}>
           <option value="">Select ledger</option>
           {accounts.map((account) => (
             <option key={account.id} value={account.id}>{account.code} - {account.name}</option>

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
@@ -29,6 +29,7 @@ export function VoucherRegisterPanel() {
   const [to, setTo] = useState('');
   const [page, setPage] = useState(1);
   const [activeIndex, setActiveIndex] = useState(0);
+  const searchRef = useRef(null);
 
   const limit = 15;
   const offset = (page - 1) * limit;
@@ -82,6 +83,12 @@ export function VoucherRegisterPanel() {
       if (event.key.toLowerCase() === 'n') {
         event.preventDefault();
         navigate('/vouchers/new');
+        return;
+      }
+
+      if (event.key === '/') {
+        event.preventDefault();
+        searchRef.current?.focus();
       }
     },
     [navigate, openActive, rows.length]
@@ -95,6 +102,7 @@ export function VoucherRegisterPanel() {
 
       <div className="p-3 grid gap-2 md:grid-cols-6 text-sm">
         <input
+          ref={searchRef}
           className="focusable border border-tally-panelBorder p-1 bg-white md:col-span-2"
           placeholder="Search voucher no / narration"
           value={search}
@@ -168,6 +176,14 @@ export function VoucherRegisterPanel() {
                 className={`${idx === activeIndex ? 'bg-tally-background' : ''} hover:bg-tally-background cursor-pointer`}
                 onClick={() => navigate(`/vouchers/${voucher.id}/edit`)}
                 onMouseEnter={() => setActiveIndex(idx)}
+                tabIndex={0}
+                onFocus={() => setActiveIndex(idx)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    navigate(`/vouchers/${voucher.id}/edit`);
+                  }
+                }}
               >
                 <td>{formatDate(voucher.voucherDate)}</td>
                 <td>{voucher.voucherNumber}</td>
@@ -188,7 +204,7 @@ export function VoucherRegisterPanel() {
       </div>
 
       <div className="p-3 flex items-center justify-between text-xs">
-        <span>Showing {rows.length} of {total}</span>
+        <span>Showing {rows.length} of {total} • `/` search • Enter open</span>
         <div className="flex items-center gap-2">
           <button
             type="button"

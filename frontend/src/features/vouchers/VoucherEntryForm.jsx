@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
@@ -38,6 +38,10 @@ export function VoucherEntryForm({ voucherId }) {
   const [lineError, setLineError] = useState('');
   const [reversalNumber, setReversalNumber] = useState('');
   const [reversalDate, setReversalDate] = useState(new Date().toISOString().slice(0, 10));
+  const voucherTypeRef = useRef(null);
+  const voucherDateRef = useRef(null);
+  const narrationRef = useRef(null);
+  const ledgerSearchRef = useRef(null);
 
   const isEditMode = Boolean(voucherId);
 
@@ -240,6 +244,30 @@ export function VoucherEntryForm({ voucherId }) {
       return;
     }
 
+    if (event.altKey && event.key === '1') {
+      event.preventDefault();
+      voucherTypeRef.current?.focus();
+      return;
+    }
+
+    if (event.altKey && event.key === '2') {
+      event.preventDefault();
+      voucherDateRef.current?.focus();
+      return;
+    }
+
+    if (event.altKey && event.key === '3') {
+      event.preventDefault();
+      narrationRef.current?.focus();
+      return;
+    }
+
+    if (event.altKey && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      ledgerSearchRef.current?.focus();
+      return;
+    }
+
     if (isPosted && event.altKey && event.key.toLowerCase() === 'r') {
       event.preventDefault();
       reverseVoucher.mutate();
@@ -263,6 +291,7 @@ export function VoucherEntryForm({ voucherId }) {
         <label className="flex flex-col gap-1">
           Type
           <select
+            ref={voucherTypeRef}
             disabled={!canEdit}
             className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
             value={voucherType}
@@ -288,6 +317,7 @@ export function VoucherEntryForm({ voucherId }) {
         <label className="flex flex-col gap-1">
           Date
           <input
+            ref={voucherDateRef}
             disabled={!canEdit}
             type="date"
             className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
@@ -299,6 +329,7 @@ export function VoucherEntryForm({ voucherId }) {
         <label className="flex flex-col gap-1 md:col-span-3">
           Narration
           <input
+            ref={narrationRef}
             disabled={!canEdit}
             className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
             value={narration}
@@ -309,6 +340,7 @@ export function VoucherEntryForm({ voucherId }) {
         <label className="flex flex-col gap-1 md:col-span-2">
           Ledger Search
           <input
+            ref={ledgerSearchRef}
             className="focusable border border-tally-panelBorder bg-white p-1"
             placeholder="Type ledger/group"
             value={ledgerSearch}
@@ -374,6 +406,7 @@ export function VoucherEntryForm({ voucherId }) {
       </table>
 
       <div className="p-3 flex flex-wrap gap-2 text-sm items-center">
+        <span className="text-xs">⌘/Ctrl+S Save/Post • ⌥A Add Line • ⌥L Ledger Search • ⌥1/2/3 Jump Fields</span>
         {canEdit && (
           <>
             <button type="button" onClick={addLine} className="focusable boxed px-3 py-1">⌥A Add Line</button>
