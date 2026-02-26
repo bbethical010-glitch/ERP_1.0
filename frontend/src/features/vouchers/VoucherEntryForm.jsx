@@ -75,6 +75,7 @@ export function VoucherEntryForm({ voucherId }) {
     setReversalNumber(`RV-${existingVoucher.voucherNumber || '0001'}`);
   }, [existingVoucher]);
 
+  const canEdit = !isEditMode || existingVoucher?.status === 'DRAFT';
   const isPosted = isEditMode && existingVoucher?.status === 'POSTED';
   const isReversed = isEditMode && existingVoucher?.status === 'REVERSED';
   const isCancelled = isEditMode && existingVoucher?.status === 'CANCELLED';
