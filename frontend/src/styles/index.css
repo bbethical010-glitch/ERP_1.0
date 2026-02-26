@@ -24,13 +24,18 @@ body {
 .table-grid td,
 .table-grid th {
   border: 1px solid #6e9d96;
-  padding: 0.3rem 0.45rem;
+  padding: 0.25rem 0.4rem;
+}
+
+.table-grid td {
+  font-variant-numeric: tabular-nums;
 }
 
 .focusable:focus-visible {
-  outline: 2px solid #114f46;
-  outline-offset: 0;
-  box-shadow: 0 0 0 2px #d8efeb inset;
+  outline: 2px solid #005a8f;
+  /* Distinct solid color */
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px rgba(0, 90, 143, 0.4);
 }
 
 .hotkey-chip {
@@ -81,4 +86,20 @@ body {
   border: 1px solid #5b8f88;
   padding: 0.05rem 0.35rem;
   background: #e8f4f2;
+}
+
+/* 
+ * Section 9: Keyboard First Mode Styles
+ * If keyboard-first-mode is active, we can optionally hide the cursor 
+ * over the main interface to emphasize keyboard navigation.
+ */
+body.keyboard-first-mode {
+  cursor: default;
+}
+
+body.keyboard-first-mode input,
+body.keyboard-first-mode button,
+body.keyboard-first-mode select {
+  cursor: default;
+  /* Disable pointers */
 }

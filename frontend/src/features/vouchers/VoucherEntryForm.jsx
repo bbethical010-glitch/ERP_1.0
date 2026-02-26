@@ -99,6 +99,7 @@ export function VoucherEntryForm({ voucherId }) {
       return api.post('/vouchers', payload);
     },
     onSuccess: (result) => {
+      announceToScreenReader('Voucher saved successfully');
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
       queryClient.invalidateQueries({ queryKey: ['daybook'] });
@@ -125,6 +126,7 @@ export function VoucherEntryForm({ voucherId }) {
         }))
       }),
     onSuccess: () => {
+      announceToScreenReader('Voucher posted successfully');
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
@@ -139,6 +141,7 @@ export function VoucherEntryForm({ voucherId }) {
     mutationFn: async () =>
       api.post(`/vouchers/${voucherId}/cancel`, {}),
     onSuccess: () => {
+      announceToScreenReader('Voucher cancelled');
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
       navigate('/vouchers');
@@ -153,6 +156,7 @@ export function VoucherEntryForm({ voucherId }) {
         narration: `Reversal of voucher ${voucherNumber}`
       }),
     onSuccess: (result) => {
+      announceToScreenReader('Voucher reversed successfully');
       queryClient.invalidateQueries({ queryKey: ['vouchers'] });
       queryClient.invalidateQueries({ queryKey: ['voucher', voucherId] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
@@ -288,7 +292,7 @@ export function VoucherEntryForm({ voucherId }) {
   }
 
   return (
-    <form className="boxed shadow-panel" onSubmit={postNow} onKeyDown={onFormKeyDown}>
+    <form className="boxed shadow-panel" onSubmit={postNow} onKeyDown={onFormKeyDown} role="region" aria-label="Voucher Entry">
       <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold flex items-center justify-between">
         <span>{isEditMode ? `Voucher (${existingVoucher?.status || '...'})` : 'Voucher Entry'}</span>
         <span className={totals.isBalanced ? '' : 'text-red-200'}>
