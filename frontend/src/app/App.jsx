@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { createHashRouter, Navigate, RouterProvider } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { LoginPage } from '../pages/LoginPage';
 import { TallyShell } from './TallyShell';
