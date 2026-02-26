@@ -148,9 +148,9 @@ export function TallyShell() {
             case SCREENS.VOUCHER_REGISTER:
                 return <VoucherRegisterPanel />;
             case SCREENS.VOUCHER_NEW:
-                return <VoucherEntryForm />;
+                return <VoucherEntryForm vtype={current.params?.vtype} />;
             case SCREENS.VOUCHER_EDIT:
-                return <VoucherEntryForm voucherId={current.params?.voucherId} />;
+                return <VoucherEntryForm voucherId={current.params?.voucherId} vtype={current.params?.vtype} />;
             case SCREENS.DAYBOOK:
                 return <DaybookPanel />;
             case SCREENS.TRIAL_BALANCE:

@@ -22,7 +22,6 @@ export function LedgerCreateForm() {
 
     const [name, setName] = useState('');
     const [groupCode, setGroupCode] = useState('');
-    const [groupId, setGroupId] = useState('');
     const [normalBalance, setNormalBalance] = useState('DR');
     const [openingBalance, setOpeningBalance] = useState('');
     const [openingBalanceType, setOpeningBalanceType] = useState('DR');
@@ -38,17 +37,17 @@ export function LedgerCreateForm() {
         staleTime: 60_000
     });
 
-    // When user selects a group by code, find the backend group id
+    // Derive groupId so it dynamically updates when query completes
+    const selectedGroup = groups.find((g) => g.code === groupCode);
+    const groupId = selectedGroup?.id || '';
+
+    // When user selects a group by code
     function onGroupChange(code, label, category) {
         setGroupCode(code);
         // Auto-set normal balance based on category
         const debitCategories = ['CURRENT_ASSET', 'FIXED_ASSET', 'EXPENSE'];
         setNormalBalance(debitCategories.includes(category) ? 'DR' : 'CR');
         setOpeningBalanceType(debitCategories.includes(category) ? 'DR' : 'CR');
-
-        // Try to match by code
-        const match = groups.find((g) => g.code === code);
-        setGroupId(match?.id || '');
     }
 
     const saveMutation = useMutation({
@@ -123,7 +122,7 @@ export function LedgerCreateForm() {
         >
             {/* Header */}
             <div className="tally-panel-header flex items-center justify-between">
-                <span>Ledger Creation</span>
+                <span>Ledger Creation ({groups.length} groups loaded)</span>
                 <span className="text-xs font-normal opacity-75">Ctrl+Enter Accept · Esc Quit</span>
             </div>
 

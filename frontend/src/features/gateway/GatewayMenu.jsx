@@ -71,17 +71,17 @@ export function GatewayMenu() {
       if (isTyping) return false;
 
       // Numeric shortcuts 1-6 for quick voucher creation
-      const quickMap = {
-        '1': '/vouchers/new?vtype=PAYMENT',
-        '2': '/vouchers/new?vtype=RECEIPT',
-        '3': '/vouchers/new?vtype=SALES',
-        '4': '/vouchers/new?vtype=PURCHASE',
-        '5': '/vouchers/new?vtype=JOURNAL',
-        '6': '/vouchers/new?vtype=CONTRA',
+      const quickTypes = {
+        '1': 'JOURNAL',
+        '2': 'PAYMENT',
+        '3': 'RECEIPT',
+        '4': 'SALES',
+        '5': 'PURCHASE',
+        '6': 'CONTRA',
       };
-      if (quickMap[keyString]) {
+      if (quickTypes[keyString]) {
         event.preventDefault();
-        pushScreen(SCREENS.VOUCHER_NEW, { vtype: keyString });
+        pushScreen(SCREENS.VOUCHER_NEW, { vtype: quickTypes[keyString] });
         return true;
       }
 

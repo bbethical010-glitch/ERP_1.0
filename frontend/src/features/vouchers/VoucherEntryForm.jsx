@@ -7,6 +7,7 @@ import { LedgerSearch } from '../../components/LedgerSearch';
 import { announceToScreenReader } from '../../hooks/useFocusUtilities';
 import { PrintModal } from '../../components/PrintModal';
 import { useViewState } from '../../providers/ViewStateProvider';
+import { registerKeyHandler } from '../../lib/KeyboardManager';
 
 const emptyLine = { accountId: '', entryType: 'DR', amount: '' };
 
@@ -21,12 +22,12 @@ function computeTotals(entries) {
   return { debit, credit, difference, isBalanced: difference === 0 };
 }
 
-export function VoucherEntryForm({ voucherId }) {
+export function VoucherEntryForm({ voucherId, vtype }) {
   const { popScreen } = useViewState();
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const businessId = user?.businessId;
-  const prefilledType = null; // Passed via ViewState params if needed
+  const prefilledType = vtype || null;
 
   const [voucherType, setVoucherType] = useState(
     VOUCHER_TYPES.includes(prefilledType) ? prefilledType : 'JOURNAL'
@@ -232,31 +233,39 @@ export function VoucherEntryForm({ voucherId }) {
     createOrSaveDraft.mutate('POST');
   }
 
-  useKeyboardHandler('voucher', (event, keyString, isInput) => {
-    if (keyString === 'ctrl+enter') {
-      event.preventDefault();
-      postNow();
-      return true;
-    }
-    if (keyString === 'ctrl+d' && isInput) {
-      event.preventDefault();
-      addLine();
-      return true;
-    }
-    if (keyString === 'alt+r') {
-      event.preventDefault();
-      announceToScreenReader('Repeat last voucher not implemented');
-      return true;
-    }
-    if (keyString === 'f12') {
-      event.preventDefault();
-      announceToScreenReader('Voucher configuration not implemented');
-      return true;
-    }
-    return false;
-  });
+  useEffect(() => {
+    return registerKeyHandler(20, (event, keyString, isInput) => {
+      if (keyString === 'ctrl+enter') {
+        event.preventDefault();
+        postNow(event);
+        return true;
+      }
+      if (keyString === 'ctrl+d' && isInput) {
+        event.preventDefault();
+        addLine();
+        return true;
+      }
+      if (keyString === 'alt+r') {
+        event.preventDefault();
+        announceToScreenReader('Repeat last voucher not implemented');
+        return true;
+      }
+      if (keyString === 'f12') {
+        event.preventDefault();
+        announceToScreenReader('Voucher configuration not implemented');
+        return true;
+      }
+      return false;
+    });
+  }, [postNow, addLine]);
 
   function onFormKeyDown(event) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      popScreen();
+      return;
+    }
+
     // Ctrl+P / Cmd+P → Print (for POSTED vouchers)
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'p') {
       event.preventDefault();

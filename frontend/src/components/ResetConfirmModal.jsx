@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
 
@@ -9,6 +9,7 @@ import { useAuth } from '../auth/AuthContext';
  */
 export function ResetConfirmModal({ open, onClose, onReset }) {
     const { user } = useAuth();
+    const queryClient = useQueryClient();
     const [confirmText, setConfirmText] = useState('');
     const inputRef = useRef(null);
 
@@ -30,7 +31,10 @@ export function ResetConfirmModal({ open, onClose, onReset }) {
 
     const resetMutation = useMutation({
         mutationFn: () => api.post('/reset-company', { confirmationName: confirmText }),
-        onSuccess: () => onReset(),
+        onSuccess: () => {
+            queryClient.invalidateQueries();
+            onReset();
+        },
     });
 
     function handleKeyDown(e) {
