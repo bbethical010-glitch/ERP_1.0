@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { commandBus, COMMANDS } from '../core/CommandBus';
 
 /**
  * ViewStateProvider — Tally-style hierarchical navigation stack.
@@ -77,6 +78,25 @@ export function ViewStateProvider({ children }) {
             return updated;
         });
     }, []);
+
+    // Phase L: Subscribe to CommandBus events for internal navigation
+    useEffect(() => {
+        const unsubPush = commandBus.subscribe(COMMANDS.VIEW_PUSH, (payload) => {
+            pushScreen(payload.screen, payload.params, payload.currentFocusIndex || 0);
+        });
+
+        const unsubPop = commandBus.subscribe(COMMANDS.VIEW_POP, () => {
+            popScreen();
+        });
+
+        // Also update the centralized CommandBus with the active view for logging/context
+        commandBus.setActiveView(current?.screen || 'UNKNOWN');
+
+        return () => {
+            unsubPush();
+            unsubPop();
+        };
+    }, [pushScreen, popScreen, current?.screen]);
 
     const value = useMemo(() => ({
         current,

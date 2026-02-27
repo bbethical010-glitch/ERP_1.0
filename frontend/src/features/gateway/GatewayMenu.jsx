@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import { useAuth } from '../../auth/AuthContext';
 import { useViewState, SCREENS } from '../../providers/ViewStateProvider';
+import { commandBus, COMMANDS } from '../../core/CommandBus';
 import { getGatewaySections, VOUCHER_QUICK_ACTIONS } from '../../lib/navigation';
 import { useFocusList, useAutoFocus } from '../../lib/FocusManager';
 import { registerKeyHandler, matchesBinding } from '../../lib/KeyboardManager';
@@ -16,7 +17,7 @@ function formatAmount(value) {
  * Vertical stacked sections. Arrow↑↓ navigates. Enter drills. No cards.
  */
 export function GatewayMenu() {
-  const { pushScreen, current } = useViewState();
+  const { current } = useViewState();
   const { user } = useAuth();
   const businessId = user?.businessId;
   const canManageUsers = user?.role === 'OWNER';
@@ -55,7 +56,9 @@ export function GatewayMenu() {
 
   function navigateItem(item) {
     const screen = pathToScreen[item.path];
-    if (screen) pushScreen(screen);
+    if (screen) {
+      commandBus.dispatch(COMMANDS.VIEW_PUSH, { screen });
+    }
   }
 
   const { activeIndex, setActiveIndex, containerProps } = useFocusList(selectableItems.length, {
@@ -81,7 +84,10 @@ export function GatewayMenu() {
       };
       if (quickTypes[keyString]) {
         event.preventDefault();
-        pushScreen(SCREENS.VOUCHER_NEW, { vtype: quickTypes[keyString] });
+        commandBus.dispatch(COMMANDS.VIEW_PUSH, {
+          screen: SCREENS.VOUCHER_NEW,
+          params: { vtype: quickTypes[keyString] }
+        });
         return true;
       }
 
@@ -99,13 +105,13 @@ export function GatewayMenu() {
       // N for new voucher
       if (keyString === 'n') {
         event.preventDefault();
-        pushScreen(SCREENS.VOUCHER_NEW);
+        commandBus.dispatch(COMMANDS.VIEW_PUSH, { screen: SCREENS.VOUCHER_NEW });
         return true;
       }
 
       return false;
     });
-  }, [selectableItems, pushScreen]);
+  }, [selectableItems]);
 
   // Dashboard summary (minimal, one-line, no cards)
   const { data } = useQuery({
