@@ -19,6 +19,7 @@ class CommandBus {
     constructor() {
         this.listeners = new Map();
         this.activeViewId = 'GLOBAL'; // Default view identifier
+        this.isDispatching = new Set(); // Guard against infinite recursion during dispatch
         console.log('[%cCommandBus%c] Instantiated (Layer 2 Backbone)', 'color: #d16b15; font-weight: bold', 'color: inherit');
     }
 
@@ -45,7 +46,19 @@ class CommandBus {
         this.logCommand(command, payload);
 
         const commandListeners = this.listeners.get(command);
-        if (commandListeners) {
+        if (!commandListeners || commandListeners.size === 0) {
+            console.warn(`[%cCommandBus%c] ⚠️ Command dispatched but NO LISTENERS found: ${command}`, 'color: #d16b15; font-weight: bold', 'color: inherit');
+            return;
+        }
+
+        if (this.isDispatching.has(command)) {
+            console.warn(`[%cCommandBus%c] ⚠️ Blocked recursive dispatch for: ${command}`, 'color: #d16b15; font-weight: bold', 'color: inherit');
+            return;
+        }
+
+        this.isDispatching.add(command);
+
+        try {
             commandListeners.forEach((callback) => {
                 try {
                     callback(payload);
@@ -53,13 +66,13 @@ class CommandBus {
                     console.error(`[CommandBus] Error executing subscriber for ${command}:`, error);
                 }
             });
+        } finally {
+            this.isDispatching.delete(command);
         }
     }
 
     logCommand(command, payload) {
         const timestamp = new Date().toISOString();
-        // In actual production, payload might be large (like DOM events), 
-        // so we format it carefully or extract safe parts.
         let safePayload = { ...payload };
         if (safePayload.originalEvent) {
             safePayload.originalEvent = `[Event: ${safePayload.originalEvent.type}]`;

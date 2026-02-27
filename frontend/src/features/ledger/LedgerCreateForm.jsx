@@ -38,31 +38,33 @@ export function LedgerCreateForm() {
 
     // Phase M: Register strict FocusGraph nodes
     useEffect(() => {
-        focusGraph.init('ledger-create');
+        if (!focusGraph.isEnabled) return;
 
-        focusGraph.registerNode('ledgerName', {
+        focusGraph.init('ledger-form', {
+            autoFocus: true,
+            defaultNode: 'lName'
+        });
+
+        focusGraph.registerNode('lName', {
             next: () => {
                 if (!stateRef.current.name.trim()) {
                     setError('Ledger name is required');
-                    return 'ledgerName'; // Stay here
+                    return 'lName'; // Stay here
                 }
                 setError('');
-                return 'groupCode';
+                return 'lGroup';
             },
             prev: null
         });
-        focusGraph.registerNode('groupCode', { next: 'openingBalance', prev: 'ledgerName' });
-        focusGraph.registerNode('openingBalance', { next: 'openingBalanceType', prev: 'groupCode' });
-        focusGraph.registerNode('openingBalanceType', {
+        focusGraph.registerNode('lGroup', { next: 'lOpeningBalance', prev: 'lName' });
+        focusGraph.registerNode('lOpeningBalance', { next: 'submitLedger', prev: 'lGroup' });
+        focusGraph.registerNode('submitLedger', {
             next: () => {
                 stateRef.current.handleSubmit();
-                return null; // Stop focus traversal, submission handles the rest
+                return null;
             },
-            prev: 'openingBalance'
+            prev: 'lOpeningBalance'
         });
-
-        // Set initial focus
-        setTimeout(() => focusGraph.setCurrentNode('ledgerName'), 50);
 
         return () => {
             focusGraph.destroy();

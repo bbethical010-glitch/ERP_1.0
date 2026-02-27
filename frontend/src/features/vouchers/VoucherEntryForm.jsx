@@ -9,6 +9,7 @@ import { PrintModal } from '../../components/PrintModal';
 import { useViewState } from '../../providers/ViewStateProvider';
 import { focusGraph } from '../../core/FocusGraph';
 import { gridEngine } from '../../core/GridEngine';
+import { commandBus, COMMANDS } from '../../core/CommandBus';
 
 const emptyLine = { accountId: '', entryType: 'DR', amount: '' };
 
@@ -89,51 +90,58 @@ export function VoucherEntryForm({ voucherId, vtype }) {
 
   // Phase N: Initialize GridEngine and FocusGraph
   useEffect(() => {
-    // 1. Grid Engine for the table rows
-    gridEngine.init('voucher-grid', () => {
-      // Callback when pressing Enter/Tab on the last column of the last row
-      if (!totals.isBalanced && canEdit) {
-        addLine();
-        // Focus jump is now handled in the registerMatrix useEffect below to avoid race conditions
-      } else if (totals.isBalanced && canEdit) {
-        // If balanced, jump focus to the final Submit button using FocusGraph
-        focusGraph.setCurrentNode('submitVoucher');
-      }
-    });
-
-    // 2. Focus Graph for the outer form fields
-    focusGraph.init('voucher-form');
-    focusGraph.registerNode('vType', { next: 'vNumber', prev: null });
-    focusGraph.registerNode('vNumber', { next: 'vDate', prev: 'vType' });
-    focusGraph.registerNode('vDate', { next: 'vNarration', prev: 'vNumber' });
-    focusGraph.registerNode('vNarration', {
-      next: () => {
-        // Jump into grid
-        if (entries.length > 0) {
-          gridEngine.setCurrentCoord(0, 0);
-          return null; // Stop outer focus graph
+    // Graceful bypassing when engines are disabled
+    if (gridEngine.isEnabled) {
+      // 1. Grid Engine for the table rows
+      gridEngine.init('voucher-grid', () => {
+        // Callback when pressing Enter/Tab on the last column of the last row
+        if (!totals.isBalanced && canEdit) {
+          addLine();
+        } else if (totals.isBalanced && canEdit) {
+          focusGraph.setCurrentNode('submitVoucher');
         }
-        return 'submitVoucher';
-      },
-      prev: 'vDate'
-    });
-    focusGraph.registerNode('submitVoucher', {
-      next: () => {
-        postNow();
-        return null;
-      },
-      prev: () => {
-        // Jump back to end of grid
-        if (entries.length > 0) {
-          gridEngine.setCurrentCoord(entries.length - 1, 3);
+      });
+    }
+
+    if (focusGraph.isEnabled) {
+      // 2. Focus Graph for the outer form fields
+      focusGraph.init('voucher-form');
+      focusGraph.registerNode('vType', { next: 'vNumber', prev: null });
+      focusGraph.registerNode('vNumber', { next: 'vDate', prev: 'vType' });
+      focusGraph.registerNode('vDate', { next: 'vNarration', prev: 'vNumber' });
+      focusGraph.registerNode('vNarration', {
+        next: () => {
+          if (entries.length > 0 && gridEngine.isEnabled) {
+            gridEngine.setCurrentCoord(0, 0);
+            return null;
+          }
+          return 'submitVoucher';
+        },
+        prev: 'vDate'
+      });
+      focusGraph.registerNode('submitVoucher', {
+        next: () => {
+          postNow();
           return null;
+        },
+        prev: () => {
+          if (entries.length > 0 && gridEngine.isEnabled) {
+            gridEngine.setCurrentCoord(entries.length - 1, 3);
+            return null;
+          }
+          return 'vNarration';
         }
-        return 'vNarration';
-      }
-    });
+      });
 
-    if (!isEditMode) {
-      setTimeout(() => focusGraph.setCurrentNode('vType'), 50);
+      if (!isEditMode) {
+        setTimeout(() => {
+          if (document.getElementById('vType')) {
+            focusGraph.setCurrentNode('vType');
+          } else {
+            console.warn('[VoucherEntryForm] vType not found in DOM, skipping initial focus.');
+          }
+        }, 100);
+      }
     }
 
     return () => {
@@ -146,16 +154,20 @@ export function VoucherEntryForm({ voucherId, vtype }) {
 
   // Phase N: Register dynamic grid matrix whenever entries change
   useEffect(() => {
+    if (!gridEngine.isEnabled) return;
+
     const matrix = entries.map((_, idx) => [
       `grid-ledger-${idx}`,
       null, // Group cell is display-only
       `grid-type-${idx}`,
       `grid-amount-${idx}`
     ]);
-    gridEngine.registerMatrix(matrix);
+    if (gridEngine.isEnabled) {
+      gridEngine.registerMatrix(matrix);
 
-    if (entries.length > prevRowsRef.current) {
-      gridEngine.setCurrentCoord(entries.length - 1, 0);
+      if (entries.length > prevRowsRef.current) {
+        gridEngine.setCurrentCoord(entries.length - 1, 0);
+      }
     }
     prevRowsRef.current = entries.length;
   }, [entries]);
@@ -317,8 +329,10 @@ export function VoucherEntryForm({ voucherId, vtype }) {
     });
 
     const unsubSave = commandBus.subscribe(COMMANDS.FORM_SAVE, (payload) => {
-      if (payload?.originalEvent) payload.originalEvent.preventDefault();
-      postNow(payload?.originalEvent);
+      if (!isPrintOpen) {
+        if (payload?.originalEvent) payload.originalEvent.preventDefault();
+        postNow(payload?.originalEvent);
+      }
     });
 
     return () => {
@@ -466,7 +480,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
                       businessId={businessId}
                       autoFocus={false}
                       value={selected}
-                      onChange={(ledger) => updateLine(idx, 'accountId', ledger?.id || '')}
+                      onChange={(ledgerObj) => updateLine(idx, 'accountId', ledgerObj?.id || '')}
                     />
                   </td>
                   <td>{selected?.groupName || '-'}</td>

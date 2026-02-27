@@ -136,9 +136,22 @@ export function TallyShell() {
             case SCREENS.VOUCHER_REGISTER:
                 return <VoucherRegisterPanel />;
             case SCREENS.VOUCHER_NEW:
-                return <VoucherEntryForm vtype={current.params?.vtype} />;
+                try {
+                    return <VoucherEntryForm vtype={current.params?.vtype} />;
+                } catch (e) {
+                    console.error("VoucherEntryForm Mount Crash:", e);
+                    return <div className="p-4 text-red-500 bg-red-100 font-mono text-sm leading-relaxed overflow-auto max-h-[80vh]">
+                        <h2 className="font-bold text-lg mb-2">Voucher Crash</h2>
+                        <pre>{e.toString()}\n{e.stack}</pre>
+                    </div>;
+                }
             case SCREENS.VOUCHER_EDIT:
-                return <VoucherEntryForm voucherId={current.params?.voucherId} vtype={current.params?.vtype} />;
+                try {
+                    return <VoucherEntryForm voucherId={current.params?.voucherId} vtype={current.params?.vtype} />;
+                } catch (e) {
+                    console.error("VoucherEntryForm Mount Crash:", e);
+                    return <div className="p-4 text-red-500">Voucher Crash: {e.message}</div>;
+                }
             case SCREENS.DAYBOOK:
                 return <DaybookPanel />;
             case SCREENS.TRIAL_BALANCE:

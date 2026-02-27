@@ -12,7 +12,7 @@ class GridEngine {
         this.viewId = null;
         this.unsubscribeBus = null;
         this.onRowAdd = null; // Callback when tabbing past last row
-        this.isEnabled = false; // Disabled temporarily for architectural stability
+        this.isEnabled = true; // Re-enabling for Q8 Validation
         console.log('[%cGridEngine%c] Instantiated (Layer 5 Engine)', 'color: #008f5a; font-weight: bold', 'color: inherit');
     }
 
@@ -129,7 +129,7 @@ class GridEngine {
     }
 
     moveNextCol() {
-        if (this.rows.length === 0) return;
+        if (!Array.isArray(this.rows) || this.rows.length === 0) return;
         const nextTarget = this._findNextValidCell(this.currentRowIdx, this.currentColIdx + 1);
         if (nextTarget) {
             this.setCurrentCoord(nextTarget[0], nextTarget[1]);
@@ -137,7 +137,7 @@ class GridEngine {
     }
 
     movePrevCol() {
-        if (this.rows.length === 0) return;
+        if (!Array.isArray(this.rows) || this.rows.length === 0) return;
         const prevTarget = this._findPrevValidCell(this.currentRowIdx, this.currentColIdx - 1);
         if (prevTarget) {
             this.setCurrentCoord(prevTarget[0], prevTarget[1]);
@@ -145,6 +145,7 @@ class GridEngine {
     }
 
     moveDownRow() {
+        if (!Array.isArray(this.rows) || this.rows.length === 0) return;
         if (this.currentRowIdx < this.rows.length - 1) {
             // Find valid cell straight down, or if null, next valid in that row
             let targetCol = this.currentColIdx;
@@ -161,6 +162,7 @@ class GridEngine {
     }
 
     moveUpRow() {
+        if (!Array.isArray(this.rows) || this.rows.length === 0) return;
         if (this.currentRowIdx > 0) {
             let targetCol = this.currentColIdx;
             while (targetCol < this.rows[this.currentRowIdx - 1].length && this.rows[this.currentRowIdx - 1][targetCol] === null) {

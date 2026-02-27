@@ -79,6 +79,8 @@ export function LoginPage() {
   }, []);
 
   useEffect(() => {
+    if (!focusGraph.isEnabled) return;
+
     focusGraph.init('login-page');
 
     if (mode === 'signin') {

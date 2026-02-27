@@ -10,7 +10,7 @@ class FocusGraph {
         this.currentNodeId = null;
         this.viewId = null;
         this.unsubscribeBus = null;
-        this.isEnabled = false; // Disabled temporarily for architectural stability
+        this.isEnabled = true; // Slowly re-enabling for Q7 verification
         console.log('[%cFocusGraph%c] Instantiated (Layer 3 Engine)', 'color: #8f0075; font-weight: bold', 'color: inherit');
     }
 

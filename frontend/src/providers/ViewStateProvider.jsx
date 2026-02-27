@@ -43,20 +43,26 @@ export function ViewStateProvider({ children }) {
 
     const pushScreen = useCallback((screen, params = {}, currentFocusIndex = 0) => {
         // Save current focus index for restore
+        const prevLength = stack.length;
         setStack((prev) => {
             const updated = [...prev];
             updated[updated.length - 1] = {
                 ...updated[updated.length - 1],
                 focusIndex: currentFocusIndex,
             };
-            return [...updated, { screen, params, focusIndex: 0 }];
+            const newStack = [...updated, { screen, params, focusIndex: 0 }];
+            console.log(`[%cViewState%c] PUSH -> ${screen} (Depth: ${prevLength} -> ${newStack.length})`, 'color: #008f5a', 'color: inherit');
+            return newStack;
         });
     }, []);
 
     const popScreen = useCallback(() => {
+        const prevLength = stack.length;
         setStack((prev) => {
             if (prev.length <= 1) return prev; // Can't pop past gateway
-            return prev.slice(0, -1);
+            const newStack = prev.slice(0, -1);
+            console.log(`[%cViewState%c] POP (Depth: ${prevLength} -> ${newStack.length})`, 'color: #d16b15', 'color: inherit');
+            return newStack;
         });
     }, []);
 
