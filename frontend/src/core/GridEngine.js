@@ -12,6 +12,8 @@ class GridEngine {
         this.viewId = null;
         this.unsubscribeBus = null;
         this.onRowAdd = null; // Callback when tabbing past last row
+        this.isEnabled = false; // Disabled temporarily for architectural stability
+        console.log('[%cGridEngine%c] Instantiated (Layer 5 Engine)', 'color: #008f5a; font-weight: bold', 'color: inherit');
     }
 
     /**
@@ -20,6 +22,10 @@ class GridEngine {
      * @param {function} onRowAdd - Callback to trigger when advancing past the final row.
      */
     init(viewId, onRowAdd) {
+        if (!this.isEnabled) {
+            console.log(`[%cGridEngine%c] Init skipped for view: ${viewId} (Engine is currently disabled)`, 'color: gray', 'color: inherit');
+            return;
+        }
         this.viewId = viewId;
         this.rows = [];
         this.currentRowIdx = 0;
@@ -35,8 +41,8 @@ class GridEngine {
         const unsubPrev = commandBus.subscribe(COMMANDS.FOCUS_PREV, () => this.movePrevCol());
 
         // Create new specific commands for grid row traversal
-        const unsubGridDown = commandBus.subscribe('GRID_DOWN', () => this.moveDownRow());
-        const unsubGridUp = commandBus.subscribe('GRID_UP', () => this.moveUpRow());
+        const unsubGridDown = commandBus.subscribe(COMMANDS.GRID_DOWN, () => this.moveDownRow());
+        const unsubGridUp = commandBus.subscribe(COMMANDS.GRID_UP, () => this.moveUpRow());
 
         this.unsubscribeBus = () => {
             unsubNext();

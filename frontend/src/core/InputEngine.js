@@ -53,9 +53,9 @@ class InputEngine {
         } else if (event.key === 'Enter') {
             commandToDispatch = COMMANDS.FOCUS_NEXT;
         } else if (event.key === 'ArrowDown') {
-            commandToDispatch = 'GRID_DOWN';
+            commandToDispatch = COMMANDS.GRID_DOWN;
         } else if (event.key === 'ArrowUp') {
-            commandToDispatch = 'GRID_UP';
+            commandToDispatch = COMMANDS.GRID_UP;
         }
 
         if (commandToDispatch) {

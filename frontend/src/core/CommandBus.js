@@ -19,6 +19,7 @@ class CommandBus {
     constructor() {
         this.listeners = new Map();
         this.activeViewId = 'GLOBAL'; // Default view identifier
+        console.log('[%cCommandBus%c] Instantiated (Layer 2 Backbone)', 'color: #d16b15; font-weight: bold', 'color: inherit');
     }
 
     setActiveView(viewId) {

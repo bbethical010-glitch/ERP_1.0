@@ -10,6 +10,8 @@ class FocusGraph {
         this.currentNodeId = null;
         this.viewId = null;
         this.unsubscribeBus = null;
+        this.isEnabled = false; // Disabled temporarily for architectural stability
+        console.log('[%cFocusGraph%c] Instantiated (Layer 3 Engine)', 'color: #8f0075; font-weight: bold', 'color: inherit');
     }
 
     /**
@@ -17,6 +19,10 @@ class FocusGraph {
      * @param {string} viewId - The unique identifier for this view instance.
      */
     init(viewId) {
+        if (!this.isEnabled) {
+            console.log(`[%cFocusGraph%c] Init skipped for view: ${viewId} (Engine is currently disabled)`, 'color: gray', 'color: inherit');
+            return;
+        }
         this.viewId = viewId;
         this.nodes.clear();
         this.currentNodeId = null;
