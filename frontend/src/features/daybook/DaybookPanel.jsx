@@ -43,9 +43,7 @@ export function DaybookPanel() {
       }
     }));
 
-    listEngine.init(SCREENS.DAYBOOK, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.DAYBOOK);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 

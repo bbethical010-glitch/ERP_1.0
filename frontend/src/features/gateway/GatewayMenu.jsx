@@ -76,9 +76,7 @@ export function GatewayMenu() {
       onSelect: () => navigateItem(item)
     }));
 
-    listEngine.init(SCREENS.GATEWAY, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.GATEWAY);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 

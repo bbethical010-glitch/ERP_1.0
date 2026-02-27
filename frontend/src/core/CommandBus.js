@@ -59,13 +59,18 @@ class CommandBus {
         this.isDispatching.add(command);
 
         try {
-            commandListeners.forEach((callback) => {
+            const listenersArray = Array.from(commandListeners).reverse();
+            for (const callback of listenersArray) {
+                if (payload.handled) {
+                    console.log(`[%cCommandBus%c] 🛑 Event chain stopped by handler for: ${command}`, 'color: #d1b415', 'color: inherit');
+                    break;
+                }
                 try {
                     callback(payload);
                 } catch (error) {
                     console.error(`[CommandBus] Error executing subscriber for ${command}:`, error);
                 }
-            });
+            }
         } finally {
             this.isDispatching.delete(command);
         }

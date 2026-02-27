@@ -49,9 +49,7 @@ export function LedgerPanel() {
       }
     }));
 
-    listEngine.init(SCREENS.LEDGER_LIST, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.LEDGER_LIST);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 

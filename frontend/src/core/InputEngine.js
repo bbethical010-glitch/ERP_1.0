@@ -52,10 +52,6 @@ class InputEngine {
             commandToDispatch = COMMANDS.VIEW_POP;
         } else if (event.key === 'Enter') {
             commandToDispatch = COMMANDS.FOCUS_NEXT;
-        } else if (event.key === 'ArrowDown') {
-            commandToDispatch = COMMANDS.GRID_DOWN;
-        } else if (event.key === 'ArrowUp') {
-            commandToDispatch = COMMANDS.GRID_UP;
         }
 
         if (commandToDispatch) {

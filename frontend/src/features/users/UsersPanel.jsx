@@ -31,9 +31,7 @@ export function UsersPanel() {
       }
     }));
 
-    listEngine.init(SCREENS.USERS, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.USERS);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 

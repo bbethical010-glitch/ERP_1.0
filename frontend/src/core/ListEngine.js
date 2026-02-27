@@ -27,7 +27,7 @@ class ListEngine {
         const unsubDown = commandBus.subscribe(COMMANDS.GRID_DOWN, () => this.moveDown());
         const unsubUp = commandBus.subscribe(COMMANDS.GRID_UP, () => this.moveUp());
         const unsubEnter = commandBus.subscribe(COMMANDS.FOCUS_NEXT, () => this.selectCurrent());
-        const unsubPop = commandBus.subscribe(COMMANDS.VIEW_POP, () => this.handleBack());
+        const unsubPop = commandBus.subscribe(COMMANDS.VIEW_POP, (payload) => this.handleBack(payload));
 
         this.unsubscribeBus = () => {
             unsubDown();
@@ -86,9 +86,12 @@ class ListEngine {
         }
     }
 
-    handleBack() {
+    handleBack(payload = {}) {
         if (this.onBack) {
-            this.onBack();
+            const handled = this.onBack();
+            if (handled) {
+                payload.handled = true;
+            }
         }
     }
 

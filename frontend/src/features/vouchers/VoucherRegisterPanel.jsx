@@ -58,9 +58,7 @@ export function VoucherRegisterPanel() {
       }
     }));
 
-    listEngine.init(SCREENS.VOUCHER_REGISTER, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.VOUCHER_REGISTER);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 

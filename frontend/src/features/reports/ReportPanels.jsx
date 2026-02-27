@@ -74,9 +74,9 @@ export function TrialBalancePanel() {
       onBack: () => {
         if (level > 0) {
           setDrillStack(prev => prev.slice(0, -1)); // pop internal drilldown instead of view stack
-        } else {
-          commandBus.dispatch(COMMANDS.VIEW_POP);
+          return true; // Consume the POP event
         }
+        return false; // Let ViewStateProvider pop the screen
       }
     });
 
@@ -186,9 +186,7 @@ export function ProfitLossPanel() {
       onSelect: () => { }
     }));
 
-    listEngine.init(SCREENS.PROFIT_LOSS, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.PROFIT_LOSS);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 
@@ -264,9 +262,7 @@ export function BalanceSheetPanel() {
       onSelect: () => { }
     }));
 
-    listEngine.init(SCREENS.BALANCE_SHEET, {
-      onBack: () => commandBus.dispatch(COMMANDS.VIEW_POP)
-    });
+    listEngine.init(SCREENS.BALANCE_SHEET);
     listEngine.registerItems(listMap);
     listEngine.setCurrentIndex(activeIndex);
 
