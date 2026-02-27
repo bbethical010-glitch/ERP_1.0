@@ -8,7 +8,8 @@ import { announceToScreenReader } from '../../hooks/useFocusUtilities';
 import { PrintModal } from '../../components/PrintModal';
 import { useViewState } from '../../providers/ViewStateProvider';
 import { registerKeyHandler } from '../../lib/KeyboardManager';
-import { useEnterToAdvance } from '../../hooks/useEnterToAdvance';
+import { focusGraph } from '../../core/FocusGraph';
+import { gridEngine } from '../../core/GridEngine';
 
 const emptyLine = { accountId: '', entryType: 'DR', amount: '' };
 
@@ -49,19 +50,8 @@ export function VoucherEntryForm({ voucherId, vtype }) {
   const firstLedgerRef = useRef(null);
   const formRef = useRef(null);
 
-  useEnterToAdvance(formRef, {
-    onFinalEnter: () => {
-      // If we're on the last line and it's heavily unbalanced, add a new line.
-      // Else if balanced, we can save.
-      if (!totals.isBalanced && canEdit) {
-        addLine();
-      } else if (totals.isBalanced && canEdit) {
-        postNow();
-      }
-    }
-  });
-
   const isEditMode = Boolean(voucherId);
+
 
   const { data: accounts = [] } = useQuery({
     queryKey: ['accounts', businessId],
@@ -98,6 +88,79 @@ export function VoucherEntryForm({ voucherId, vtype }) {
 
   const totals = useMemo(() => computeTotals(entries), [entries]);
 
+  // Phase N: Initialize GridEngine and FocusGraph
+  useEffect(() => {
+    // 1. Grid Engine for the table rows
+    gridEngine.init('voucher-grid', () => {
+      // Callback when pressing Enter/Tab on the last column of the last row
+      if (!totals.isBalanced && canEdit) {
+        addLine();
+        // Focus jump is now handled in the registerMatrix useEffect below to avoid race conditions
+      } else if (totals.isBalanced && canEdit) {
+        // If balanced, jump focus to the final Submit button using FocusGraph
+        focusGraph.setCurrentNode('submitVoucher');
+      }
+    });
+
+    // 2. Focus Graph for the outer form fields
+    focusGraph.init('voucher-form');
+    focusGraph.registerNode('vType', { next: 'vNumber', prev: null });
+    focusGraph.registerNode('vNumber', { next: 'vDate', prev: 'vType' });
+    focusGraph.registerNode('vDate', { next: 'vNarration', prev: 'vNumber' });
+    focusGraph.registerNode('vNarration', {
+      next: () => {
+        // Jump into grid
+        if (entries.length > 0) {
+          gridEngine.setCurrentCoord(0, 0);
+          return null; // Stop outer focus graph
+        }
+        return 'submitVoucher';
+      },
+      prev: 'vDate'
+    });
+    focusGraph.registerNode('submitVoucher', {
+      next: () => {
+        postNow();
+        return null;
+      },
+      prev: () => {
+        // Jump back to end of grid
+        if (entries.length > 0) {
+          gridEngine.setCurrentCoord(entries.length - 1, 3);
+          return null;
+        }
+        return 'vNarration';
+      }
+    });
+
+    if (!isEditMode) {
+      setTimeout(() => focusGraph.setCurrentNode('vType'), 50);
+    }
+
+    return () => {
+      gridEngine.destroy();
+      focusGraph.destroy();
+    };
+  }, [totals.isBalanced, canEdit, entries.length, isEditMode]);
+
+  const prevRowsRef = useRef(entries.length);
+
+  // Phase N: Register dynamic grid matrix whenever entries change
+  useEffect(() => {
+    const matrix = entries.map((_, idx) => [
+      `grid-ledger-${idx}`,
+      null, // Group cell is display-only
+      `grid-type-${idx}`,
+      `grid-amount-${idx}`
+    ]);
+    gridEngine.registerMatrix(matrix);
+
+    if (entries.length > prevRowsRef.current) {
+      gridEngine.setCurrentCoord(entries.length - 1, 0);
+    }
+    prevRowsRef.current = entries.length;
+  }, [entries]);
+
   const createOrSaveDraft = useMutation({
     mutationFn: async (mode) => {
       const payload = {
@@ -106,7 +169,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
         voucherDate,
         narration,
         mode,
-        entries: entries.map((line) => ({
+        entries: entries.filter((line) => line.accountId).map((line) => ({
           accountId: line.accountId,
           entryType: line.entryType,
           amount: Number(line.amount)
@@ -135,7 +198,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
         voucherNumber: voucherNumber || undefined,
         voucherDate,
         narration,
-        entries: entries.map((line) => ({
+        entries: entries.filter((line) => line.accountId).map((line) => ({
           accountId: line.accountId,
           entryType: line.entryType,
           amount: Number(line.amount)
@@ -187,19 +250,16 @@ export function VoucherEntryForm({ voucherId, vtype }) {
   });
 
   function validateLines() {
-    if (entries.length < 2) {
+    const validEntries = entries.filter((line) => line.accountId);
+
+    if (validEntries.length < 2) {
       setLineError('At least 2 ledger lines required');
       announceToScreenReader('Error: At least 2 ledger lines required');
       return false;
     }
 
-    for (let i = 0; i < entries.length; i++) {
-      const line = entries[i];
-      if (!line.accountId) {
-        setLineError(`Line ${i + 1} must have a ledger account`);
-        announceToScreenReader(`Error: Line ${i + 1} must have a ledger account`);
-        return false;
-      }
+    for (let i = 0; i < validEntries.length; i++) {
+      const line = validEntries[i];
       if (!Number.isFinite(Number(line.amount)) || Number(line.amount) <= 0) {
         setLineError(`Line ${i + 1} must have an amount greater than zero`);
         announceToScreenReader(`Error: Line ${i + 1} must have an amount greater than zero`);
@@ -328,7 +388,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
 
   return (
     <>
-      <form ref={formRef} className="boxed shadow-panel" onSubmit={postNow} onKeyDown={onFormKeyDown} role="region" aria-label="Voucher Entry">
+      <form className="boxed shadow-panel" onSubmit={postNow} onKeyDown={onFormKeyDown} role="region" aria-label="Voucher Entry">
         <div className="bg-tally-header text-white px-3 py-2 text-sm font-semibold flex items-center justify-between">
           <span>{isEditMode ? `Voucher (${existingVoucher?.status || '...'})` : 'Voucher Entry'}</span>
           <span className={totals.isBalanced ? '' : 'text-red-200'}>
@@ -340,7 +400,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
           <label className="flex flex-col gap-1">
             Type
             <select
-              ref={voucherTypeRef}
+              id="vType"
               disabled={!canEdit}
               className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
               value={voucherType}
@@ -355,6 +415,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
           <label className="flex flex-col gap-1">
             Number
             <input
+              id="vNumber"
               disabled={!canEdit}
               className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
               value={voucherNumber}
@@ -366,7 +427,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
           <label className="flex flex-col gap-1">
             Date
             <input
-              ref={voucherDateRef}
+              id="vDate"
               disabled={!canEdit}
               type="date"
               className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
@@ -378,7 +439,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
           <label className="flex flex-col gap-1 md:col-span-3">
             Narration
             <input
-              ref={narrationRef}
+              id="vNarration"
               disabled={!canEdit}
               className="focusable border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
               value={narration}
@@ -403,8 +464,9 @@ export function VoucherEntryForm({ voucherId, vtype }) {
                 <tr key={idx} className={!totals.isBalanced && ((totals.difference > 0 && line.entryType === 'DR') || (totals.difference < 0 && line.entryType === 'CR')) ? 'bg-red-50' : ''}>
                   <td>
                     <LedgerSearch
+                      id={`grid-ledger-${idx}`}
                       businessId={businessId}
-                      autoFocus={idx === 0}
+                      autoFocus={false}
                       value={selected}
                       onChange={(ledger) => updateLine(idx, 'accountId', ledger?.id || '')}
                     />
@@ -412,6 +474,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
                   <td>{selected?.groupName || '-'}</td>
                   <td>
                     <select
+                      id={`grid-type-${idx}`}
                       disabled={!canEdit}
                       className="focusable w-full border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
                       value={line.entryType}
@@ -423,6 +486,7 @@ export function VoucherEntryForm({ voucherId, vtype }) {
                   </td>
                   <td>
                     <input
+                      id={`grid-amount-${idx}`}
                       disabled={!canEdit}
                       className="focusable w-full text-right border border-tally-panelBorder bg-white p-1 disabled:bg-gray-100"
                       type="number"

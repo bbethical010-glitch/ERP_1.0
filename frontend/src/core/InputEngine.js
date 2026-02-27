@@ -12,12 +12,12 @@ class InputEngine {
     }
 
     init() {
-        window.addEventListener('keydown', this.handleKeyDown, { capture: true });
+        window.addEventListener('keydown', this.handleKeyDown);
         console.log('[%cInputEngine%c] Initialized and attached to window.', 'color: #005a8f; font-weight: bold', 'color: inherit');
     }
 
     destroy() {
-        window.removeEventListener('keydown', this.handleKeyDown, { capture: true });
+        window.removeEventListener('keydown', this.handleKeyDown);
         console.log('[%cInputEngine%c] Destroyed.', 'color: #005a8f; font-weight: bold', 'color: inherit');
     }
 
@@ -50,6 +50,10 @@ class InputEngine {
             commandToDispatch = COMMANDS.VIEW_POP;
         } else if (event.key === 'Enter') {
             commandToDispatch = COMMANDS.FOCUS_NEXT;
+        } else if (event.key === 'ArrowDown') {
+            commandToDispatch = 'GRID_DOWN';
+        } else if (event.key === 'ArrowUp') {
+            commandToDispatch = 'GRID_UP';
         }
 
         if (commandToDispatch) {

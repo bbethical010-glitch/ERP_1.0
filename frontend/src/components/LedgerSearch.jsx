@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { useRoamingTabIndex } from '../hooks/useFocusUtilities';
 
-export function LedgerSearch({ value, onChange, onBlur, autoFocus, businessId }) {
+export function LedgerSearch({ id, value, onChange, onBlur, autoFocus, businessId }) {
     const [query, setQuery] = useState('');
     const [isOpen, setIsOpen] = useState(false);
     const inputRef = useRef(null);
@@ -21,7 +21,7 @@ export function LedgerSearch({ value, onChange, onBlur, autoFocus, businessId })
 
     const { data: ledgers = [], isLoading } = useQuery({
         queryKey: ['ledgers', businessId, debouncedQuery],
-        queryFn: () => api.get(`/ledgers?businessId=${businessId}&search=${debouncedQuery}&limit=20`),
+        queryFn: () => api.get(`/accounts?search=${debouncedQuery}&limit=20`),
         enabled: Boolean(businessId) && isOpen,
     });
 
@@ -53,19 +53,21 @@ export function LedgerSearch({ value, onChange, onBlur, autoFocus, businessId })
 
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
             if (!isOpen) {
-                setIsOpen(true);
-                e.preventDefault();
-                return;
+                return; // Let it bubble to GridEngine
             }
             roamingKeyDown(e);
+            e.stopPropagation();
             return;
         }
 
         if (e.key === 'Escape') {
-            e.preventDefault();
-            setIsOpen(false);
-            setQuery('');
-            setActiveIndex(-1);
+            if (isOpen) {
+                e.preventDefault();
+                e.stopPropagation();
+                setIsOpen(false);
+                setQuery('');
+                setActiveIndex(-1);
+            }
             return;
         }
 
@@ -92,6 +94,7 @@ export function LedgerSearch({ value, onChange, onBlur, autoFocus, businessId })
     return (
         <div className="relative w-full">
             <input
+                id={id}
                 ref={inputRef}
                 type="text"
                 role="combobox"
