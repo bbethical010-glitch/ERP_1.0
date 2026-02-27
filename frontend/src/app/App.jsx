@@ -4,6 +4,7 @@ import { LoginPage } from '../pages/LoginPage';
 import { TallyShell } from './TallyShell';
 import { ViewStateProvider } from '../providers/ViewStateProvider';
 import { installGlobalKeyListener } from '../lib/KeyboardManager';
+import { inputEngine } from '../core/InputEngine';
 
 /**
  * App — Entry point.
@@ -37,7 +38,13 @@ function AuthGate() {
 export function App() {
   // Install global keyboard listener once
   useEffect(() => {
-    return installGlobalKeyListener();
+    inputEngine.init();
+    const cleanupOld = installGlobalKeyListener();
+
+    return () => {
+      inputEngine.destroy();
+      cleanupOld();
+    };
   }, []);
 
   return <AuthGate />;
