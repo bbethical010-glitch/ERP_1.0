@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS businesses (
   base_currency CHAR(3) NOT NULL DEFAULT 'INR',
   address TEXT,
   financial_year_start DATE,
+  is_initialized BOOLEAN NOT NULL DEFAULT FALSE,
   updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

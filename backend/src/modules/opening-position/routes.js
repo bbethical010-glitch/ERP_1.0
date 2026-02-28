@@ -176,6 +176,12 @@ openingPositionRouter.post('/', requireAuth, async (req, res, next) => {
             );
         }
 
+        // 7. Mark Business as Initialized
+        await client.query(
+            "UPDATE businesses SET is_initialized = TRUE, updated_at = NOW() WHERE id = $1",
+            [businessId]
+        );
+
         await client.query('COMMIT');
         res.json({ success: true, message: 'Opening position posted successfully', voucherId });
     } catch (err) {

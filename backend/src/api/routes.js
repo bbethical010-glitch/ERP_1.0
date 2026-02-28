@@ -10,6 +10,7 @@ import { dashboardRouter } from '../modules/dashboard/routes.js';
 import { resetRouter } from '../modules/reset/routes.js';
 import { auditRouter } from '../modules/audit/routes.js';
 import { openingPositionRouter } from '../modules/opening-position/routes.js';
+import { requireInitialized } from '../middleware/requireInitialized.js';
 
 export const apiRouter = Router();
 
@@ -21,10 +22,11 @@ apiRouter.use('/auth', authRouter);
 apiRouter.use(requireAuth);
 
 apiRouter.use('/accounts', accountsRouter);
-apiRouter.use('/vouchers', vouchersRouter);
-apiRouter.use('/reports', reportsRouter);
-apiRouter.use('/daybook', daybookRouter);
-apiRouter.use('/dashboard', dashboardRouter);
+apiRouter.use('/ledger', requireInitialized, ledgerRouter);
+apiRouter.use('/vouchers', requireInitialized, vouchersRouter);
+apiRouter.use('/reports', requireInitialized, reportsRouter);
+apiRouter.use('/daybook', requireInitialized, daybookRouter);
+apiRouter.use('/dashboard', requireInitialized, dashboardRouter);
 apiRouter.use('/businesses', businessesRouter);
 apiRouter.use('/reset-company', resetRouter);
 apiRouter.use('/audit', auditRouter);

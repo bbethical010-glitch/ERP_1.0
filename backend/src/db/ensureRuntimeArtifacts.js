@@ -272,4 +272,32 @@ export async function ensureRuntimeArtifacts() {
   await pool.query(
     `CREATE INDEX IF NOT EXISTS idx_inventory_tx_business_product ON inventory_transactions (business_id, product_id)`
   );
+
+  await pool.query(`
+    DO $$ 
+    BEGIN 
+      IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_name = 'businesses' 
+          AND column_name = 'is_initialized'
+      ) THEN 
+        ALTER TABLE businesses ADD COLUMN is_initialized BOOLEAN NOT NULL DEFAULT FALSE;
+      END IF;
+    END $$;
+  `);
+
+  await pool.query(`
+    DO $$ 
+    BEGIN 
+      IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_name = 'businesses' 
+          AND column_name = 'is_initialized'
+      ) THEN 
+        ALTER TABLE businesses ADD COLUMN is_initialized BOOLEAN NOT NULL DEFAULT FALSE;
+      END IF;
+    END $$;
+  `);
 }

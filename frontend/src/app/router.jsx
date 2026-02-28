@@ -25,7 +25,7 @@ export const router = createHashRouter([
   {
     path: '/company-setup',
     element: (
-      <RequireAuth>
+      <RequireAuth requireInit={false}>
         <CompanySetupPage />
       </RequireAuth>
     )
@@ -33,7 +33,7 @@ export const router = createHashRouter([
   {
     path: '/opening-position',
     element: (
-      <RequireAuth>
+      <RequireAuth requireInit={false}>
         <OpeningPositionForm />
       </RequireAuth>
     )
