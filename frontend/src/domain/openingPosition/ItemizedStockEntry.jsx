@@ -42,6 +42,9 @@ export function ItemizedStockEntry({ inventory, onChange, onClose }) {
             } else if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
                 handleSave();
+            } else if ((e.metaKey || e.ctrlKey) && (e.key.toLowerCase() === 'n' || e.key.toLowerCase() === 'a')) {
+                e.preventDefault();
+                handleAdd();
             }
         };
         window.addEventListener('keydown', handleGlobalKeydown);
@@ -182,7 +185,7 @@ export function ItemizedStockEntry({ inventory, onChange, onClose }) {
                                         onClick={handleAdd}
                                         className="w-full text-left focusable p-1 text-blue-600 hover:text-blue-800"
                                     >
-                                        + Add row (Alt+N)
+                                        + Add row (Cmd+N/A)
                                     </button>
                                 </td>
                             </tr>

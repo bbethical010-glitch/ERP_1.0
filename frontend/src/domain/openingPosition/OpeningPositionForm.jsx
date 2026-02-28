@@ -37,7 +37,7 @@ export function OpeningPositionForm() {
         { ledgerName: 'Owner Capital', group: 'Capital Account', drCr: 'CR', amount: 0 },
         { ledgerName: 'Cash', group: 'Cash-in-Hand', drCr: 'DR', amount: 0 },
         { ledgerName: 'Bank A/c', group: 'Bank Accounts', drCr: 'DR', amount: 0 },
-        { ...DEFAULT_LINE }
+        ...Array(12).fill(null).map(() => ({ ...DEFAULT_LINE }))
     ]);
 
     const [inventory, setInventory] = useState([]);
@@ -110,10 +110,18 @@ export function OpeningPositionForm() {
                     handleSubmit();
                 }
             }
-            // Alt+N -> Add row
-            if (e.altKey && e.key === 'n') {
+            // Cmd/Ctrl+N -> Add row
+            if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
                 e.preventDefault();
                 if (!showStockEntry) handleAddLine();
+            }
+            // Add Stock (Cmd/Ctrl+A or 'a' when not focusing input)
+            if (!showStockEntry) {
+                if (((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'a') ||
+                    (e.key.toLowerCase() === 'a' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'SELECT')) {
+                    e.preventDefault();
+                    setShowStockEntry(true);
+                }
             }
         };
 
@@ -181,13 +189,13 @@ export function OpeningPositionForm() {
                     {/* LEFT COLUMN: Ledger Grid */}
                     <div className="w-2/3 border-r border-tally-panelBorder flex flex-col bg-white overflow-y-auto">
                         <div className="p-3 bg-[#f2f4f8] border-b border-tally-panelBorder flex items-center justify-between text-xs">
-                            <span className="opacity-80">Enter Ledger opening balances (Tab/Enter to navigate, Alt+N to add row)</span>
+                            <span className="opacity-80">Enter Ledger opening balances (Tab/Enter to navigate, Cmd+N to add row)</span>
                             <button
                                 type="button"
                                 onClick={() => setShowStockEntry(true)}
                                 className="focusable bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 text-xs"
                             >
-                                {inventory.length > 0 ? `Edit Inventory (${inventory.length} items)` : 'Add Stock Item'}
+                                {inventory.length > 0 ? `Edit Inventory (${inventory.length} items)` : 'Add Stock Item (Cmd+A)'}
                             </button>
                         </div>
 

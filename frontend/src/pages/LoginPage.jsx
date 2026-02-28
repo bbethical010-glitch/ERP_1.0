@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { focusGraph } from '../core/FocusGraph';
 import { api } from '../lib/api';
 import { useAuth } from '../auth/AuthContext';
@@ -11,6 +12,7 @@ import { commandBus, COMMANDS } from '../core/CommandBus';
  */
 export function LoginPage() {
   const { login } = useAuth();
+  const navigate = useNavigate();
 
   const [mode, setMode] = useState('signin');
   const [username, setUsername] = useState('');
@@ -33,7 +35,7 @@ export function LoginPage() {
     setIsSubmitting(true);
     try {
       await login({ username, password });
-      // AuthGate will automatically switch to AuthenticatedApp
+      navigate('/', { replace: true });
     } catch (err) {
       setError(err.message || 'Login failed');
     } finally {
@@ -63,7 +65,7 @@ export function LoginPage() {
       localStorage.setItem('erp_auth_token', result.token);
       localStorage.setItem('erp_auth_user', JSON.stringify(result.user));
       await login({ username: registerForm.username, password: registerForm.password });
-      // AuthGate will automatically switch to AuthenticatedApp
+      navigate('/', { replace: true });
     } catch (err) {
       setRegisterError(err.message || 'Sign up failed');
     } finally {
