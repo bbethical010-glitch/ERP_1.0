@@ -70,7 +70,7 @@ async function bootstrapBusinessDefaults(client, businessId) {
       ($1, 'Liabilities', 'LI', 'LIABILITY', TRUE),
       ($1, 'Income', 'IN', 'INCOME', TRUE),
       ($1, 'Expenses', 'EX', 'EXPENSE', TRUE),
-      ($1, 'Capital', 'EQ', 'EQUITY', TRUE)
+      ($1, 'Capital Account', 'EQ', 'EQUITY', TRUE)
      ON CONFLICT (business_id, code) DO NOTHING`,
     [businessId]
   );
