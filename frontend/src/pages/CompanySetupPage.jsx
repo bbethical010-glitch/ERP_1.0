@@ -52,7 +52,7 @@ export function CompanySetupPage() {
             }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['business-me'] });
-            navigate('/gateway');
+            navigate('/opening-position');
         },
         onError: (err) => setError(err.message || 'Failed to save company details')
     });
@@ -75,7 +75,7 @@ export function CompanySetupPage() {
         }
         if (e.key === 'Escape') {
             e.preventDefault();
-            navigate('/gateway');
+            navigate('/opening-position');
         }
     }
 
@@ -169,7 +169,7 @@ export function CompanySetupPage() {
                         <button
                             type="button"
                             className="focusable boxed px-4 py-2"
-                            onClick={() => navigate('/gateway')}
+                            onClick={() => navigate('/opening-position')}
                         >
                             Skip (Esc)
                         </button>

@@ -15,6 +15,7 @@ import { UsersPage } from '../pages/UsersPage';
 import { ChangePasswordPage } from '../pages/ChangePasswordPage';
 import { CompanySetupPage } from '../pages/CompanySetupPage';
 import { LedgerCreatePage } from '../pages/LedgerCreatePage';
+import { OpeningPositionForm } from '../domain/openingPosition/OpeningPositionForm';
 
 export const router = createHashRouter([
   {
@@ -26,6 +27,14 @@ export const router = createHashRouter([
     element: (
       <RequireAuth>
         <CompanySetupPage />
+      </RequireAuth>
+    )
+  },
+  {
+    path: '/opening-position',
+    element: (
+      <RequireAuth>
+        <OpeningPositionForm />
       </RequireAuth>
     )
   },

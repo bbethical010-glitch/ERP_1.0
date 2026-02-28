@@ -197,6 +197,8 @@ export function GatewayMenu() {
         <span>Liabilities: <strong className="tally-amount">₹{formatAmount(kpis.totalLiabilities)}</strong></span>
         <span>Profit(MTD): <strong className="tally-amount">₹{formatAmount(kpis.netProfitMtd)}</strong></span>
         <span>Cash: <strong className="tally-amount">₹{formatAmount(kpis.cashBankBalance)}</strong></span>
+        <span>Stock: <strong className="tally-amount">₹{formatAmount(kpis.totalStockValue)}</strong></span>
+        <span>Items: <strong className="tally-amount">{kpis.totalUniqueItems || 0}</strong></span>
         {alerts.unbalancedDrafts > 0 && (
           <span className="text-tally-warning">⚠ {alerts.unbalancedDrafts} unbalanced drafts</span>
         )}

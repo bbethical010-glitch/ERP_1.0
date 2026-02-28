@@ -70,7 +70,9 @@ dashboardRouter.get('/summary', async (req, res, next) => {
          COALESCE(SUM(CASE WHEN category = 'EQUITY' THEN ABS(closing_signed) ELSE 0 END), 0) AS equity,
          COALESCE(SUM(CASE WHEN name ILIKE '%cash%' OR name ILIKE '%bank%' THEN closing_signed ELSE 0 END), 0) AS cash_bank,
          (SELECT income_mtd - expense_mtd FROM pnl) AS net_profit_mtd,
-         (SELECT income_ytd - expense_ytd FROM pnl_ytd) AS net_profit_ytd
+         (SELECT income_ytd - expense_ytd FROM pnl_ytd) AS net_profit_ytd,
+         (SELECT COALESCE(SUM(total_value), 0) FROM inventory_transactions WHERE business_id = $1 AND transaction_date <= $2::date) AS total_inventory_value,
+         (SELECT COUNT(*) FROM products WHERE business_id = $1 AND created_at <= $2::date) AS unique_item_count
        FROM balances`,
       [businessId, asOf, monthStart(asOf), fyStart(asOf)]
     );
@@ -148,7 +150,9 @@ dashboardRouter.get('/summary', async (req, res, next) => {
         equity: Number(kpi.equity || 0),
         netProfitMtd: Number(kpi.net_profit_mtd || 0),
         netProfitYtd: Number(kpi.net_profit_ytd || 0),
-        cashBankBalance: Number(kpi.cash_bank || 0)
+        cashBankBalance: Number(kpi.cash_bank || 0),
+        totalStockValue: Number(kpi.total_inventory_value || 0),
+        totalUniqueItems: Number(kpi.unique_item_count || 0)
       },
       alerts: {
         unbalancedDrafts: Number(alerts.unbalanced_drafts || 0),

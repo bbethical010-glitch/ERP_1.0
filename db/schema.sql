@@ -315,3 +315,27 @@ EXECUTE FUNCTION fn_validate_transaction_balance();
 -- (:business_id, 'Income',         'IN', 'INCOME',        NULL, TRUE),
 -- (:business_id, 'Expenses',       'EX', 'EXPENSE',       NULL, TRUE),
 -- (:business_id, 'Capital',        'EQ', 'EQUITY',        NULL, TRUE);
+
+CREATE TABLE IF NOT EXISTS products (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  sku TEXT,
+  category TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (business_id, sku)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_transactions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  product_id UUID NOT NULL REFERENCES products(id) ON DELETE RESTRICT,
+  voucher_id UUID REFERENCES vouchers(id) ON DELETE CASCADE,
+  transaction_date DATE NOT NULL,
+  quantity NUMERIC(10,2) NOT NULL,
+  unit_cost NUMERIC(18,2) NOT NULL DEFAULT 0,
+  total_value NUMERIC(18,2) NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_inventory_tx_business_product ON inventory_transactions (business_id, product_id);
