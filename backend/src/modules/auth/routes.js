@@ -62,19 +62,59 @@ function getAuthBusinessId(req) {
 }
 
 async function bootstrapBusinessDefaults(client, businessId) {
+  // 1️⃣ Insert ROOT groups (idempotent)
   await client.query(
-    `INSERT INTO account_groups (business_id, name, code, category, is_system)
-     VALUES
-      ($1, 'Current Assets', 'CA', 'CURRENT_ASSET', TRUE),
-      ($1, 'Fixed Assets', 'FA', 'FIXED_ASSET', TRUE),
-      ($1, 'Liabilities', 'LI', 'LIABILITY', TRUE),
-      ($1, 'Income', 'IN', 'INCOME', TRUE),
-      ($1, 'Expenses', 'EX', 'EXPENSE', TRUE),
-      ($1, 'Capital Account', 'EQ', 'EQUITY', TRUE)
-     ON CONFLICT (business_id, code) DO NOTHING`,
+    `
+    INSERT INTO account_groups (business_id, name, code, category, parent_group_id, is_system)
+    VALUES
+      ($1, 'Current Assets', 'CA', 'CURRENT_ASSET'::account_group_category, NULL, TRUE),
+      ($1, 'Fixed Assets', 'FA', 'FIXED_ASSET'::account_group_category, NULL, TRUE),
+      ($1, 'Liabilities', 'LI', 'LIABILITY'::account_group_category, NULL, TRUE),
+      ($1, 'Income', 'IN', 'INCOME'::account_group_category, NULL, TRUE),
+      ($1, 'Expenses', 'EX', 'EXPENSE'::account_group_category, NULL, TRUE),
+      ($1, 'Capital Account', 'EQ', 'EQUITY'::account_group_category, NULL, TRUE)
+    ON CONFLICT (business_id, code) DO NOTHING
+    `,
     [businessId]
   );
 
+  // 2️⃣ Fetch root groups for parent mapping
+  const rootGroups = await client.query(
+    `SELECT id, code, category FROM account_groups WHERE business_id = $1`,
+    [businessId]
+  );
+
+  const getParentId = (code) => {
+    const found = rootGroups.rows.find(r => r.code === code);
+    return found ? found.id : null;
+  };
+
+  // 3️⃣ Insert SUB groups (idempotent)
+  await client.query(
+    `
+    INSERT INTO account_groups
+    (business_id, name, code, category, parent_group_id, is_system)
+    VALUES
+      ($1, 'Cash-in-Hand', 'CA-CASH', 'CURRENT_ASSET'::account_group_category, $2, TRUE),
+      ($1, 'Bank Accounts', 'CA-BANK', 'CURRENT_ASSET'::account_group_category, $2, TRUE),
+      ($1, 'Sundry Debtors', 'CA-AR', 'CURRENT_ASSET'::account_group_category, $2, TRUE),
+
+      ($1, 'Sundry Creditors', 'LI-AP', 'LIABILITY'::account_group_category, $3, TRUE),
+
+      ($1, 'Sales Accounts', 'IN-SALES', 'INCOME'::account_group_category, $4, TRUE),
+
+      ($1, 'Purchase Accounts', 'EX-PUR', 'EXPENSE'::account_group_category, $5, TRUE),
+      ($1, 'Indirect Expenses', 'EX-IND', 'EXPENSE'::account_group_category, $5, TRUE)
+    ON CONFLICT (business_id, code) DO NOTHING
+    `,
+    [
+      businessId,
+      getParentId('CA'), // $2
+      getParentId('LI'), // $3
+      getParentId('IN'), // $4
+      getParentId('EX')  // $5
+    ]
+  );
 }
 
 authRouter.post('/login', async (req, res, next) => {
