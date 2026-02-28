@@ -9,6 +9,7 @@ import { requireAuth } from '../middleware/requireAuth.js';
 import { dashboardRouter } from '../modules/dashboard/routes.js';
 import { businessesRouter } from '../modules/businesses/routes.js';
 import { resetRouter } from '../modules/reset/routes.js';
+import { auditRouter } from '../modules/audit/routes.js';
 
 export const apiRouter = Router();
 
@@ -27,5 +28,4 @@ apiRouter.use('/ledger', ledgerRouter);
 apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/businesses', businessesRouter);
 apiRouter.use('/reset-company', resetRouter);
-
-
+apiRouter.use('/audit', auditRouter);

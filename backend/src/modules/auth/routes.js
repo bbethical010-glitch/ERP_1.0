@@ -75,20 +75,6 @@ async function bootstrapBusinessDefaults(client, businessId) {
     [businessId]
   );
 
-  await client.query(
-    `INSERT INTO account_groups (business_id, name, code, category, parent_group_id, is_system)
-     VALUES
-      ($1, 'Bank Accounts', 'CA-BANK', 'CURRENT_ASSET', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA'), TRUE),
-      ($1, 'Cash-in-Hand', 'CA-CASH', 'CURRENT_ASSET', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA'), TRUE),
-      ($1, 'Sundry Debtors', 'CA-AR', 'CURRENT_ASSET', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'CA'), TRUE),
-      ($1, 'Sundry Creditors', 'LI-AP', 'LIABILITY', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'LI'), TRUE),
-      ($1, 'Sales Accounts', 'IN-SALES', 'INCOME', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'IN'), TRUE),
-      ($1, 'Purchase Accounts', 'EX-PUR', 'EXPENSE', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EX'), TRUE),
-      ($1, 'Indirect Expenses', 'EX-IND', 'EXPENSE', (SELECT id FROM account_groups WHERE business_id = $1 AND code = 'EX'), TRUE)
-     ON CONFLICT (business_id, code) DO NOTHING`,
-    [businessId]
-  );
-
 }
 
 authRouter.post('/login', async (req, res, next) => {
@@ -258,6 +244,13 @@ authRouter.post('/signup', async (req, res, next) => {
     );
 
     await client.query('COMMIT');
+
+    const ledgerCountRes = await pool.query('SELECT COUNT(*) FROM accounts WHERE business_id = $1', [businessId]);
+    const voucherCountRes = await pool.query('SELECT COUNT(*) FROM vouchers WHERE business_id = $1', [businessId]);
+
+    console.log(`[BOOTSTRAP] New Company Created (${businessId})`);
+    console.log(`[BOOTSTRAP] Initial ledger count: ${ledgerCountRes.rows[0].count}`);
+    console.log(`[BOOTSTRAP] Initial voucher count: ${voucherCountRes.rows[0].count}`);
 
     const owner = ownerRes.rows[0];
     const token = createAuthToken(

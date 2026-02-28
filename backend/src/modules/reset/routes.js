@@ -41,8 +41,8 @@ resetRouter.post('/', async (req, res) => {
             await pool.query('DELETE FROM voucher_lines WHERE voucher_id IN (SELECT id FROM vouchers WHERE business_id = $1)', [businessId]);
             await pool.query('DELETE FROM vouchers WHERE business_id = $1', [businessId]);
             await pool.query('DELETE FROM financial_years WHERE business_id = $1', [businessId]);
-            await pool.query('DELETE FROM accounts WHERE business_id = $1 AND is_system = FALSE', [businessId]);
-            await pool.query('DELETE FROM account_groups WHERE business_id = $1 AND is_system = FALSE', [businessId]);
+            await pool.query('DELETE FROM accounts WHERE business_id = $1', [businessId]);
+            await pool.query('DELETE FROM account_groups WHERE business_id = $1', [businessId]);
             await pool.query('COMMIT');
         } catch (err) {
             await pool.query('ROLLBACK');
