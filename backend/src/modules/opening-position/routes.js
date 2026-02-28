@@ -7,25 +7,29 @@ import { requireAuth } from '../../middleware/requireAuth.js';
 export const openingPositionRouter = Router();
 
 const stockEntrySchema = z.object({
+    sku: z.string().optional(),
     name: z.string().min(1),
-    category: z.string().optional(),
-    quantity: z.number().positive(),
+    uom: z.string().optional(),
+    initialQty: z.number().positive(),
     unitCost: z.number().nonnegative(),
 });
 
+const openingBalanceSchema = z.object({
+    ledgerName: z.string().min(1),
+    group: z.string().min(1),
+    drCr: z.enum(['DR', 'CR']),
+    amount: z.number().nonnegative()
+});
+
 const openingPositionSchema = z.object({
-    assets: z.array(z.object({
-        code: z.string().min(1),
-        name: z.string().min(1),
-        amount: z.number().nonnegative()
-    })),
-    liabilities: z.array(z.object({
-        code: z.string().min(1),
-        name: z.string().min(1),
-        amount: z.number().nonnegative()
-    })),
-    capital: z.number().nonnegative(),
-    inventory: z.array(stockEntrySchema)
+    businessId: z.string().uuid().optional(),
+    date: z.string().optional(),
+    openingBalances: z.array(openingBalanceSchema),
+    items: z.array(stockEntrySchema).optional(),
+    stockJournalMetadata: z.object({
+        narration: z.string().optional(),
+        date: z.string().optional()
+    }).optional()
 });
 
 /**
@@ -40,41 +44,54 @@ openingPositionRouter.post('/', requireAuth, async (req, res, next) => {
 
         const payload = openingPositionSchema.parse(req.body);
 
-        // Server-side validation
-        let totalAssets = payload.assets.reduce((sum, item) => sum + item.amount, 0);
-        const totalLiabilities = payload.liabilities.reduce((sum, item) => sum + item.amount, 0);
+        console.log(`[OPENING] Begin opening-post for ${businessId}`);
+
+        let totalDr = 0;
+        let totalCr = 0;
         let totalInventory = 0;
 
-        payload.inventory.forEach(item => {
-            totalInventory += (item.quantity * item.unitCost);
+        // 1. Calculate Ledger Totals
+        payload.openingBalances.forEach(bal => {
+            if (bal.drCr === 'DR') totalDr += bal.amount;
+            else totalCr += bal.amount;
         });
 
-        totalAssets += totalInventory;
+        // 2. Calculate Inventory Total
+        if (payload.items) {
+            payload.items.forEach(item => {
+                totalInventory += (item.initialQty * item.unitCost);
+            });
+            totalDr += totalInventory;
+        }
 
-        // Variance check: Assets = Liabilities + Capital
-        // Due to floating point math, use a slight delta tolerance if necessary, or Math.round
-        if (Math.abs(totalAssets - (totalLiabilities + payload.capital)) > 0.01) {
-            throw httpError(400, `Imbalanced Opening Position. Assets: ${totalAssets}, Liabilities+Capital: ${totalLiabilities + payload.capital}`);
+        // Variance check: Dr = Cr
+        if (Math.abs(totalDr - totalCr) > 0.01) {
+            throw httpError(400, `Imbalanced Opening Position. Debits: ${totalDr}, Credits: ${totalCr}`);
         }
 
         await client.query('BEGIN');
 
-        // 1. Fetch system account groups mapping
+        // Fetch system account groups mapping for dynamic assignment
         const groupsRes = await client.query(
-            `SELECT id, category FROM account_groups WHERE business_id = $1`,
+            `SELECT id, name FROM account_groups WHERE business_id = $1`,
             [businessId]
         );
-        const getGroup = (cat) => groupsRes.rows.find(g => g.category === cat)?.id;
-
-        if (!getGroup('CURRENT_ASSET') || !getGroup('LIABILITY') || !getGroup('EQUITY')) {
-            throw httpError(500, 'System account groups missing. Has the database been properly initialized?');
-        }
+        const getGroupId = (groupName) => {
+            const found = groupsRes.rows.find(g => g.name.toLowerCase() === groupName.toLowerCase());
+            if (!found) {
+                // Return a default ID if the exact group isn't found, or ideally we'd throw
+                const def = groupsRes.rows.find(g => g.name === 'Current Assets');
+                return def ? def.id : null;
+            }
+            return found.id;
+        };
 
         // Helper: Find or Create Ledger Account
-        const ensureAccount = async (code, name, groupId, normalBalance) => {
+        const ensureAccount = async (name, groupId, normalBalance) => {
+            const code = name.toUpperCase().replace(/\s+/g, '-').slice(0, 20);
             const res = await client.query(
-                `SELECT id FROM accounts WHERE business_id = $1 AND code = $2`,
-                [businessId, code]
+                `SELECT id FROM accounts WHERE business_id = $1 AND name = $2`,
+                [businessId, name]
             );
             if (res.rows.length > 0) return res.rows[0].id;
 
@@ -86,21 +103,15 @@ openingPositionRouter.post('/', requireAuth, async (req, res, next) => {
             return inserted.rows[0].id;
         };
 
-        const voucherDateResult = await client.query(
-            `SELECT financial_year_start FROM businesses WHERE id = $1`,
-            [businessId]
-        );
-        const voucherDate = voucherDateResult.rows[0]?.financial_year_start || new Date().toISOString().slice(0, 10);
+        const voucherDate = payload.date || payload.stockJournalMetadata?.date || new Date().toISOString().slice(0, 10);
 
-        // 2. Create the Opening Journal Voucher
-        // Create transaction first
+        // Create the Opening Journal Voucher
         const transactionRes = await client.query(
             `INSERT INTO transactions(business_id, txn_date, narration) VALUES($1, $2, $3) RETURNING id`,
             [businessId, voucherDate, 'Opening Financial Position Entry']
         );
         const transactionId = transactionRes.rows[0].id;
 
-        // Create voucher
         const voucherRes = await client.query(
             `INSERT INTO vouchers(business_id, transaction_id, voucher_type, voucher_number, voucher_date, narration, is_system_generated)
        VALUES($1, $2, 'JOURNAL', 'OP-BAL-01', $3, 'Opening Financial Position Entry', TRUE) RETURNING id`,
@@ -109,81 +120,81 @@ openingPositionRouter.post('/', requireAuth, async (req, res, next) => {
         const voucherId = voucherRes.rows[0].id;
 
         let lineNo = 1;
+        let ledgerCount = 0;
 
-        // 3. Process Assets
-        for (const asset of payload.assets) {
-            if (asset.amount <= 0) continue;
-            const actId = await ensureAccount(asset.code, asset.name, getGroup('CURRENT_ASSET'), 'DR');
+        // Process all opening balances
+        for (const bal of payload.openingBalances) {
+            if (bal.amount <= 0) continue;
+
+            const groupId = getGroupId(bal.group);
+            if (!groupId) throw httpError(400, `Account Group not found: ${bal.group}`);
+
+            const actId = await ensureAccount(bal.ledgerName, groupId, bal.drCr);
+            ledgerCount++;
 
             await client.query(
-                `INSERT INTO transaction_entries(transaction_id, line_no, account_id, entry_type, amount) VALUES($1, $2, $3, 'DR', $4)`,
-                [transactionId, lineNo++, actId, asset.amount]
+                `INSERT INTO transaction_entries(transaction_id, line_no, account_id, entry_type, amount) VALUES($1, $2, $3, $4, $5)`,
+                [transactionId, lineNo++, actId, bal.drCr, bal.amount]
             );
         }
 
         // Process Inventory Roll-up Asset
         if (totalInventory > 0) {
-            const invActId = await ensureAccount('CA-INV', 'Inventory Control', getGroup('CURRENT_ASSET'), 'DR');
+            const stockGroupId = getGroupId('Current Assets');
+            const invActId = await ensureAccount('Stock-in-Hand', stockGroupId, 'DR');
+            ledgerCount++;
+
             await client.query(
                 `INSERT INTO transaction_entries(transaction_id, line_no, account_id, entry_type, amount) VALUES($1, $2, $3, 'DR', $4)`,
                 [transactionId, lineNo++, invActId, totalInventory]
             );
         }
 
-        // 4. Process Liabilities
-        for (const liab of payload.liabilities) {
-            if (liab.amount <= 0) continue;
-            const actId = await ensureAccount(liab.code, liab.name, getGroup('LIABILITY'), 'CR');
+        // Process Stock/Inventory lines
+        let itemsCount = 0;
+        if (payload.items && payload.items.length > 0) {
+            for (const item of payload.items) {
+                // Find or create product
+                let productRes = await client.query(`SELECT id FROM products WHERE business_id = $1 AND name = $2`, [businessId, item.name]);
+                let productId;
+                if (productRes.rows.length === 0) {
+                    const sku = item.sku || item.name.toUpperCase().replace(/\s+/g, '-').slice(0, 50);
+                    const insertRes = await client.query(
+                        `INSERT INTO products(business_id, name, sku, category) VALUES($1, $2, $3, $4) RETURNING id`,
+                        [businessId, item.name, sku, 'General']
+                    );
+                    productId = insertRes.rows[0].id;
+                } else {
+                    productId = productRes.rows[0].id;
+                }
+                itemsCount++;
 
-            await client.query(
-                `INSERT INTO transaction_entries(transaction_id, line_no, account_id, entry_type, amount) VALUES($1, $2, $3, 'CR', $4)`,
-                [transactionId, lineNo++, actId, liab.amount]
-            );
-        }
-
-        // 5. Process Capital
-        if (payload.capital > 0) {
-            const actId = await ensureAccount('EQ-CAP', 'Owner Capital', getGroup('EQUITY'), 'CR');
-
-            await client.query(
-                `INSERT INTO transaction_entries(transaction_id, line_no, account_id, entry_type, amount) VALUES($1, $2, $3, 'CR', $4)`,
-                [transactionId, lineNo++, actId, payload.capital]
-            );
-        }
-
-        // 6. Process Stock/Inventory lines
-        for (const item of payload.inventory) {
-            // Find or create product
-            let productRes = await client.query(`SELECT id FROM products WHERE business_id = $1 AND name = $2`, [businessId, item.name]);
-            let productId;
-            if (productRes.rows.length === 0) {
-                // Assume SKU is basically the name formatted, or skip SKU for now
-                const sku = item.name.toUpperCase().replace(/\\s+/g, '-').slice(0, 50);
-                const insertRes = await client.query(
-                    `INSERT INTO products(business_id, name, sku, category) VALUES($1, $2, $3, $4) RETURNING id`,
-                    [businessId, item.name, sku, item.category || 'General']
+                const totalVal = item.initialQty * item.unitCost;
+                await client.query(
+                    `INSERT INTO inventory_transactions(business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
+             VALUES($1, $2, $3, $4, $5, $6, $7)`,
+                    [businessId, productId, voucherId, voucherDate, item.initialQty, item.unitCost, totalVal]
                 );
-                productId = insertRes.rows[0].id;
-            } else {
-                productId = productRes.rows[0].id;
             }
-
-            const totalVal = item.quantity * item.unitCost;
-            await client.query(
-                `INSERT INTO inventory_transactions(business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
-         VALUES($1, $2, $3, $4, $5, $6, $7)`,
-                [businessId, productId, voucherId, voucherDate, item.quantity, item.unitCost, totalVal]
-            );
         }
 
-        // 7. Mark Business as Initialized
+        // Mark Business as Initialized
         await client.query(
             "UPDATE businesses SET is_initialized = TRUE, updated_at = NOW() WHERE id = $1",
             [businessId]
         );
 
         await client.query('COMMIT');
-        res.json({ success: true, message: 'Opening position posted successfully', voucherId });
+
+        console.log(`[OPENING] Created items: ${itemsCount}; ledgerCount: ${ledgerCount}; voucherId: ${voucherId}; stockValue: ${totalInventory.toFixed(2)}`);
+
+        res.status(201).json({
+            ok: true,
+            message: 'Opening position posted successfully',
+            stockValue: parseFloat(totalInventory.toFixed(2)),
+            ledgerCount,
+            voucherId
+        });
     } catch (err) {
         await client.query('ROLLBACK');
         if (err instanceof z.ZodError) {

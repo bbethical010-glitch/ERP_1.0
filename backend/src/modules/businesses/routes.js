@@ -41,7 +41,27 @@ businessesRouter.get('/me', requireAuth, async (req, res, next) => {
         next(err);
     }
 });
+/**
+ * GET /businesses/status
+ * Returns the initialization status of the business
+ */
+businessesRouter.get('/status', requireAuth, async (req, res, next) => {
+    try {
+        const businessId = req.user?.businessId;
+        if (!businessId) throw httpError(401, 'Business context missing');
 
+        const result = await pool.query(
+            `SELECT is_initialized FROM businesses WHERE id = $1 LIMIT 1`,
+            [businessId]
+        );
+
+        if (result.rows.length === 0) throw httpError(404, 'Business not found');
+
+        res.json({ isInitialized: result.rows[0].is_initialized });
+    } catch (err) {
+        next(err);
+    }
+});
 /**
  * PATCH /businesses/me
  * Update company details (name, address, financial year start, currency)

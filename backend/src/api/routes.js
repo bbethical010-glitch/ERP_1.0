@@ -11,6 +11,7 @@ import { resetRouter } from '../modules/reset/routes.js';
 import { auditRouter } from '../modules/audit/routes.js';
 import { openingPositionRouter } from '../modules/opening-position/routes.js';
 import { requireInitialized } from '../middleware/requireInitialized.js';
+import { businessesRouter } from '../modules/businesses/routes.js';
 
 export const apiRouter = Router();
 
