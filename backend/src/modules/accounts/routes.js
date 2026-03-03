@@ -53,7 +53,31 @@ accountsRouter.post('/groups/bootstrap', async (req, res, next) => {
         ($1, 'Liabilities', 'LI', 'LIABILITY', TRUE),
         ($1, 'Income', 'IN', 'INCOME', TRUE),
         ($1, 'Expenses', 'EX', 'EXPENSE', TRUE),
-        ($1, 'Capital', 'EQ', 'EQUITY', TRUE)
+       ($1, 'Capital', 'EQ', 'EQUITY', TRUE)
+       ON CONFLICT (business_id, code) DO NOTHING`,
+      [businessId]
+    );
+
+    await pool.query(
+      `INSERT INTO account_groups (business_id, name, code, category, parent_group_id, is_system)
+       SELECT
+         $1,
+         sub.name,
+         sub.code,
+         parent.category,
+         parent.id,
+         TRUE
+       FROM account_groups parent
+       JOIN (
+         VALUES
+           ('Cash-in-Hand', 'CA-CASH', 'CA'),
+           ('Bank Accounts', 'CA-BANK', 'CA'),
+           ('Sundry Debtors', 'CA-AR', 'CA'),
+           ('Stock-in-Hand', 'CA-STOCK', 'CA'),
+           ('Sundry Creditors', 'LI-AP', 'LI')
+       ) AS sub(name, code, parent_code)
+       ON parent.code = sub.parent_code
+       WHERE parent.business_id = $1
        ON CONFLICT (business_id, code) DO NOTHING`,
       [businessId]
     );
@@ -91,6 +115,9 @@ accountsRouter.post('/', async (req, res, next) => {
   try {
     const payload = createAccountSchema.parse(req.body);
     const businessId = getBusinessId(req);
+    if (Number(payload.openingBalance || 0) !== 0) {
+      throw httpError(400, 'Opening balance must be posted via opening-position voucher, not account master');
+    }
 
     const result = await pool.query(
       `INSERT INTO accounts (business_id, account_group_id, code, name, normal_balance, opening_balance, opening_balance_type)

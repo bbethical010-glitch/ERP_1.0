@@ -15,12 +15,19 @@ function getBusinessId(req) {
 }
 
 function normalizeIsoDate(value) {
+  const toLocalIso = (dateValue) => {
+    const year = dateValue.getFullYear();
+    const month = String(dateValue.getMonth() + 1).padStart(2, '0');
+    const day = String(dateValue.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
     return value.trim();
   }
   const parsed = new Date(value || Date.now());
-  if (Number.isNaN(parsed.getTime())) return new Date().toISOString().slice(0, 10);
-  return parsed.toISOString().slice(0, 10);
+  if (Number.isNaN(parsed.getTime())) return toLocalIso(new Date());
+  return toLocalIso(parsed);
 }
 
 function getFinancialYearRange(dateIso) {
@@ -143,8 +150,8 @@ inventoryRouter.get('/summary', async (req, res, next) => {
        FROM inventory_transactions it
        JOIN products p ON p.id = it.product_id
        WHERE it.business_id = $1
-         AND it.transaction_date <= $2::date
-       GROUP BY p.id, p.name, p.sku
+         AND it.posting_date <= $2::date
+       GROUP BY p.id, p.name, p.sku, p.reorder_level
        ORDER BY p.name`,
       [businessId, asOf]
     );
@@ -193,7 +200,7 @@ inventoryRouter.get('/stock-ledger/:productId', async (req, res, next) => {
       `WITH tx AS (
          SELECT
            it.id,
-           it.transaction_date,
+           it.posting_date,
            it.quantity,
            it.unit_cost,
            it.total_value,
@@ -204,12 +211,12 @@ inventoryRouter.get('/stock-ledger/:productId', async (req, res, next) => {
          LEFT JOIN vouchers v ON v.id = it.voucher_id
          WHERE it.business_id = $1
            AND it.product_id = $2
-           AND ($3::date IS NULL OR it.transaction_date >= $3::date)
-           AND ($4::date IS NULL OR it.transaction_date <= $4::date)
+           AND ($3::date IS NULL OR it.posting_date >= $3::date)
+           AND ($4::date IS NULL OR it.posting_date <= $4::date)
        )
        SELECT
          id,
-         transaction_date AS "date",
+         posting_date AS "date",
          voucher_id AS "voucherId",
          voucher_type AS "voucherType",
          voucher_number AS "voucherNumber",
@@ -218,8 +225,8 @@ inventoryRouter.get('/stock-ledger/:productId', async (req, res, next) => {
          quantity,
          unit_cost AS "unitCost",
          total_value AS "lineValue",
-         SUM(quantity) OVER (ORDER BY transaction_date, id) AS "runningQty",
-         SUM(total_value) OVER (ORDER BY transaction_date, id) AS "runningValue"
+         SUM(quantity) OVER (ORDER BY posting_date, id) AS "runningQty",
+         SUM(total_value) OVER (ORDER BY posting_date, id) AS "runningValue"
        FROM tx
        ORDER BY date, id`,
       [businessId, productId, from, to]
@@ -290,7 +297,7 @@ inventoryRouter.post('/adjustment', async (req, res, next) => {
          FROM inventory_transactions
          WHERE business_id = $1
            AND product_id = $2
-           AND transaction_date <= $3::date`,
+           AND posting_date <= $3::date`,
         [businessId, payload.productId, postingDate]
       );
       const availableQty = Number(stockRes.rows[0]?.qty || 0);
@@ -365,8 +372,8 @@ inventoryRouter.post('/adjustment', async (req, res, next) => {
       const signedValue = Number((qtyDelta * unitCost).toFixed(2));
       await client.query(
         `INSERT INTO inventory_transactions
-         (business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
-         VALUES ($1, $2, $3, $4::date, $5, $6, $7)`,
+         (business_id, product_id, voucher_id, transaction_date, posting_date, quantity, unit_cost, total_value)
+         VALUES ($1, $2, $3, $4::date, $4::date, $5, $6, $7)`,
         [businessId, payload.productId, voucherId, postingDate, signedQty, unitCost, signedValue]
       );
 

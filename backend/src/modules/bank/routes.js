@@ -40,10 +40,7 @@ bankRouter.get('/accounts', async (req, res, next) => {
          a.code,
          a.name,
          ag.code AS "groupCode",
-         (
-           CASE WHEN a.opening_balance_type = 'DR' THEN a.opening_balance ELSE -a.opening_balance END
-           + COALESCE(SUM(CASE WHEN lp.posting_date <= $2::date THEN lp.debit - lp.credit ELSE 0 END), 0)
-         ) AS "bookBalance",
+         COALESCE(SUM(CASE WHEN lp.posting_date <= $2::date THEN lp.debit - lp.credit ELSE 0 END), 0) AS "bookBalance",
          COALESCE(SUM(CASE WHEN lp.reconciled IS TRUE THEN lp.debit - lp.credit ELSE 0 END), 0) AS "reconciledMovement",
          COALESCE(SUM(CASE WHEN lp.reconciled IS FALSE THEN lp.debit - lp.credit ELSE 0 END), 0) AS "unreconciledMovement"
        FROM accounts a
@@ -56,7 +53,7 @@ bankRouter.get('/accounts', async (req, res, next) => {
            ag.code ILIKE 'CA-BANK%'
            OR a.name ILIKE '%bank%'
          )
-       GROUP BY a.id, a.code, a.name, ag.code, a.opening_balance, a.opening_balance_type
+       GROUP BY a.id, a.code, a.name, ag.code
        ORDER BY a.name`,
       [businessId, asOf]
     );

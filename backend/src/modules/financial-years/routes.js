@@ -19,6 +19,31 @@ function getBusinessId(req) {
   return businessId;
 }
 
+function normalizeIsoDate(dateValue, fieldName = 'date') {
+  const toLocalIso = (value) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  if (typeof dateValue === 'string') {
+    const trimmed = dateValue.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      return trimmed;
+    }
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return toLocalIso(parsed);
+    }
+  } else if (dateValue instanceof Date) {
+    if (!Number.isNaN(dateValue.getTime())) {
+      return toLocalIso(dateValue);
+    }
+  }
+  throw httpError(400, `Invalid ${fieldName}`);
+}
+
 async function ensureAccountByName(client, businessId, { name, groupCode, normalBalance, code }) {
   const existing = await client.query(
     `SELECT id
@@ -52,8 +77,7 @@ async function getDrawingsBalance(client, businessId, closeDate) {
     `SELECT
        a.id,
        a.name,
-       (CASE WHEN a.opening_balance_type = 'DR' THEN a.opening_balance ELSE -a.opening_balance END)
-       + COALESCE(SUM(lp.debit - lp.credit), 0) AS signed_balance
+       COALESCE(SUM(lp.debit - lp.credit), 0) AS signed_balance
      FROM accounts a
      JOIN account_groups ag ON ag.id = a.account_group_id
      LEFT JOIN ledger_postings lp
@@ -63,7 +87,7 @@ async function getDrawingsBalance(client, businessId, closeDate) {
      WHERE a.business_id = $1
        AND ag.category = 'EQUITY'
        AND LOWER(a.name) LIKE '%drawings%'
-     GROUP BY a.id, a.name, a.opening_balance, a.opening_balance_type`,
+     GROUP BY a.id, a.name`,
     [businessId, closeDate]
   );
 
@@ -96,8 +120,10 @@ financialYearsRouter.post('/:financialYearId/close', async (req, res, next) => {
         throw httpError(409, 'Financial year is already closed');
       }
 
-      const closeDate = payload.closeDate || String(fy.endDate).slice(0, 10);
-      if (closeDate < String(fy.startDate).slice(0, 10) || closeDate > String(fy.endDate).slice(0, 10)) {
+      const startDate = normalizeIsoDate(fy.startDate, 'startDate');
+      const endDate = normalizeIsoDate(fy.endDate, 'endDate');
+      const closeDate = payload.closeDate ? normalizeIsoDate(payload.closeDate, 'closeDate') : endDate;
+      if (closeDate < startDate || closeDate > endDate) {
         throw httpError(400, 'closeDate must be within the financial year range');
       }
 
@@ -128,7 +154,7 @@ financialYearsRouter.post('/:financialYearId/close', async (req, res, next) => {
            AND lp.financial_year_id = $2
            AND lp.posting_date BETWEEN $3::date AND $4::date
            AND a.name <> 'Year End Closing'`,
-        [businessId, fy.id, fy.startDate, closeDate]
+        [businessId, fy.id, startDate, closeDate]
       );
       const netProfit = Number(pnlRes.rows[0].income || 0) - Number(pnlRes.rows[0].expense || 0);
 

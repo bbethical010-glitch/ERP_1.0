@@ -72,7 +72,7 @@ export function LedgerCreateForm() {
     }, []);
 
     // Fetch the real account_groups from the backend so we can resolve code → id
-    const { data: groups = [] } = useQuery({
+    const { data: groups = [], isLoading: groupsLoading } = useQuery({
         queryKey: ['account-groups', businessId],
         enabled: Boolean(businessId),
         queryFn: () => api.get('/accounts/groups'),
@@ -187,7 +187,9 @@ export function LedgerCreateForm() {
                     <GroupSelector
                         id="groupCode"
                         value={groupCode}
+                        groups={groups}
                         onChange={onGroupChange}
+                        disabled={groupsLoading || groups.length === 0}
                     />
                     <div className="text-[11px] opacity-60">
                         Arrow ↑↓ to navigate · Enter to select · Type to filter

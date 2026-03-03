@@ -15,6 +15,7 @@ import { businessesRouter } from '../modules/businesses/routes.js';
 import { inventoryRouter } from '../modules/inventory/routes.js';
 import { financialYearsRouter } from '../modules/financial-years/routes.js';
 import { bankRouter } from '../modules/bank/routes.js';
+import { systemRouter } from '../modules/system/routes.js';
 
 export const apiRouter = Router();
 
@@ -38,3 +39,4 @@ apiRouter.use('/opening-position', openingPositionRouter);
 apiRouter.use('/inventory', requireInitialized, inventoryRouter);
 apiRouter.use('/financial-years', requireInitialized, financialYearsRouter);
 apiRouter.use('/bank', requireInitialized, bankRouter);
+apiRouter.use('/system', requireInitialized, systemRouter);

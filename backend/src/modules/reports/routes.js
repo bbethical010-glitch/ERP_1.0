@@ -31,8 +31,8 @@ WITH account_balances AS (
     ag.id AS group_id,
     ag.name AS group_name,
     ag.category,
-    (CASE WHEN a.opening_balance_type = 'DR' THEN a.opening_balance ELSE 0 END) + COALESCE(SUM(lp.debit), 0) AS total_dr,
-    (CASE WHEN a.opening_balance_type = 'CR' THEN a.opening_balance ELSE 0 END) + COALESCE(SUM(lp.credit), 0) AS total_cr
+    COALESCE(SUM(lp.debit), 0) AS total_dr,
+    COALESCE(SUM(lp.credit), 0) AS total_cr
   FROM accounts a
   JOIN account_groups ag ON ag.id = a.account_group_id
   LEFT JOIN ledger_postings lp ON lp.account_id = a.id
@@ -40,7 +40,7 @@ WITH account_balances AS (
     AND ($2::date IS NULL OR lp.posting_date >= $2::date)
     AND ($3::date IS NULL OR lp.posting_date <= $3::date)
   WHERE a.business_id = $1
-  GROUP BY a.id, a.code, a.name, ag.id, ag.name, ag.category, a.opening_balance, a.opening_balance_type
+  GROUP BY a.id, a.code, a.name, ag.id, ag.name, ag.category
 )
 `;
 
@@ -196,7 +196,9 @@ reportsRouter.get('/profit-loss', async (req, res, next) => {
 
 reportsRouter.get('/balance-sheet', async (req, res, next) => {
   try {
-    const { from, to } = req.query;
+    const to = req.query.to || todayIso();
+    const from = req.query.from || null;
+    const pnlFrom = from || fyStart(to);
     const businessId = getBusinessId(req);
 
     const result = await pool.query(
@@ -221,8 +223,12 @@ reportsRouter.get('/balance-sheet', async (req, res, next) => {
     const liabilities = result.rows
       .filter((row) => row.category === 'LIABILITY')
       .reduce((sum, row) => sum + Number((0 - Number(row.closingSigned || 0)).toFixed(2)), 0);
-    const equityBase = result.rows
-      .filter((row) => row.category === 'EQUITY')
+    const equityRows = result.rows.filter((row) => row.category === 'EQUITY');
+    const drawings = equityRows
+      .filter((row) => row.name && row.name.toLowerCase().includes('drawings'))
+      .reduce((sum, row) => sum + Number(row.closingSigned || 0), 0);
+    const openingCapital = equityRows
+      .filter((row) => !(row.name && row.name.toLowerCase().includes('drawings')))
       .reduce((sum, row) => sum + Number((0 - Number(row.closingSigned || 0)).toFixed(2)), 0);
     const assets = assetsCurrent + assetsNonCurrent;
 
@@ -236,11 +242,11 @@ reportsRouter.get('/balance-sheet', async (req, res, next) => {
        WHERE lp.business_id = $1
          AND ($2::date IS NULL OR lp.posting_date >= $2::date)
          AND ($3::date IS NULL OR lp.posting_date <= $3::date)`,
-      [businessId, from || null, to || null]
+      [businessId, pnlFrom, to || null]
     );
 
-    const retainedEarnings = Number(pnl.rows[0].income || 0) - Number(pnl.rows[0].expense || 0);
-    const equity = equityBase + retainedEarnings;
+    const currentYearProfit = Number(pnl.rows[0].income || 0) - Number(pnl.rows[0].expense || 0);
+    const equity = openingCapital + currentYearProfit - drawings;
     const liabilitiesAndEquity = liabilities + equity;
 
     res.json({
@@ -248,7 +254,7 @@ reportsRouter.get('/balance-sheet', async (req, res, next) => {
       assets: Number(assets.toFixed(2)),
       liabilities: Number(liabilities.toFixed(2)),
       equity: Number(equity.toFixed(2)),
-      retainedEarnings: Number(retainedEarnings.toFixed(2)),
+      retainedEarnings: Number(currentYearProfit.toFixed(2)),
       liabilitiesAndEquity: Number(liabilitiesAndEquity.toFixed(2)),
       equationDifference: Number((assets - liabilitiesAndEquity).toFixed(2)),
       equationBalanced: Number((assets - liabilitiesAndEquity).toFixed(2)) === 0,
@@ -262,8 +268,10 @@ reportsRouter.get('/balance-sheet', async (req, res, next) => {
         total: Number(liabilities.toFixed(2))
       },
       equityBreakdown: {
-        capital: Number(equityBase.toFixed(2)),
-        retainedEarnings: Number(retainedEarnings.toFixed(2)),
+        openingCapital: Number(openingCapital.toFixed(2)),
+        currentYearProfit: Number(currentYearProfit.toFixed(2)),
+        drawings: Number(drawings.toFixed(2)),
+        retainedEarnings: Number(currentYearProfit.toFixed(2)),
         total: Number(equity.toFixed(2))
       }
     });

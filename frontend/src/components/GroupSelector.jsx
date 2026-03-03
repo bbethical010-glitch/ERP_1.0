@@ -14,7 +14,64 @@ import { TALLY_GROUP_HIERARCHY } from '../lib/constants';
  *   Esc           — close without selecting
  *   Typing        — filter groups by name
  */
-export function GroupSelector({ id, value, onChange, disabled = false }) {
+function toDisplayLabel(group) {
+    return group.name || group.label || group.code;
+}
+
+function normalizeGroups(groups) {
+    if (!Array.isArray(groups) || groups.length === 0) {
+        return TALLY_GROUP_HIERARCHY.flatMap((primary) => [
+            { ...primary, isParent: true, indent: 0 },
+            ...(primary.children || []).map((child) => ({ ...child, isParent: false, indent: 1 }))
+        ]);
+    }
+
+    const byId = new Map(groups.map((group) => [group.id, group]));
+    const top = groups
+        .filter((group) => !group.parentGroupId)
+        .sort((a, b) => toDisplayLabel(a).localeCompare(toDisplayLabel(b)));
+
+    const flat = [];
+    for (const parent of top) {
+        flat.push({
+            ...parent,
+            label: toDisplayLabel(parent),
+            isParent: true,
+            indent: 0
+        });
+
+        const children = groups
+            .filter((group) => group.parentGroupId && group.parentGroupId === parent.id)
+            .sort((a, b) => toDisplayLabel(a).localeCompare(toDisplayLabel(b)));
+
+        for (const child of children) {
+            flat.push({
+                ...child,
+                label: toDisplayLabel(child),
+                isParent: false,
+                indent: 1
+            });
+        }
+    }
+
+    // Include any orphan groups without a known parent to avoid dropping valid server data.
+    const knownCodes = new Set(flat.map((group) => group.code));
+    for (const group of groups) {
+        if (!knownCodes.has(group.code)) {
+            const parentKnown = group.parentGroupId && byId.has(group.parentGroupId);
+            flat.push({
+                ...group,
+                label: toDisplayLabel(group),
+                isParent: !parentKnown,
+                indent: parentKnown ? 1 : 0
+            });
+        }
+    }
+
+    return flat;
+}
+
+export function GroupSelector({ id, value, onChange, disabled = false, groups = [] }) {
     const [open, setOpen] = useState(false);
     const [query, setQuery] = useState('');
     const [focusedIdx, setFocusedIdx] = useState(0);
@@ -22,11 +79,8 @@ export function GroupSelector({ id, value, onChange, disabled = false }) {
     const triggerRef = useRef(null);
     const queryTimeout = useRef(null);
 
-    // Flatten all groups into a single list for navigation
-    const flatGroups = TALLY_GROUP_HIERARCHY.flatMap((primary) => [
-        { ...primary, isParent: true, indent: 0 },
-        ...(primary.children || []).map((child) => ({ ...child, isParent: false, indent: 1 }))
-    ]);
+    // Flatten groups for navigation, preferring server-sourced groups when provided.
+    const flatGroups = normalizeGroups(groups);
 
     // Filter by query
     const filtered = query.trim()

@@ -92,6 +92,7 @@ async function bootstrapBusinessDefaults(client, businessId) {
         ('Cash-in-Hand', 'CA-CASH', 'CA'),
         ('Bank Accounts', 'CA-BANK', 'CA'),
         ('Sundry Debtors', 'CA-AR', 'CA'),
+        ('Stock-in-Hand', 'CA-STOCK', 'CA'),
         ('Sundry Creditors', 'LI-AP', 'LI')
     ) AS sub(name, code, parent_code)
     ON parent.code = sub.parent_code

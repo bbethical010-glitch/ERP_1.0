@@ -20,14 +20,12 @@ ledgerRouter.get('/:accountId', async (req, res, next) => {
 
     const openingRes = await pool.query(
       `SELECT
-         a.opening_balance,
-         a.opening_balance_type,
          COALESCE(SUM(lp.debit - lp.credit), 0) AS movement_before
        FROM accounts a
        LEFT JOIN ledger_postings lp
          ON lp.account_id = a.id
          AND lp.business_id = a.business_id
-         AND ($3::date IS NULL OR lp.posting_date < $3::date)
+         AND ($3::date IS NOT NULL AND lp.posting_date < $3::date)
        WHERE a.id = $1 AND a.business_id = $2
        GROUP BY a.id`,
       [accountId, businessId, from || null]
@@ -37,11 +35,7 @@ ledgerRouter.get('/:accountId', async (req, res, next) => {
       throw httpError(404, 'Ledger account not found');
     }
 
-    const openingBase =
-      openingRes.rows[0].opening_balance_type === 'DR'
-        ? Number(openingRes.rows[0].opening_balance)
-        : -Number(openingRes.rows[0].opening_balance);
-    const openingBalance = openingBase + Number(openingRes.rows[0].movement_before || 0);
+    const openingBalance = Number(openingRes.rows[0].movement_before || 0);
 
     const linesRes = await pool.query(
       `WITH lines AS (

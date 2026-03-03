@@ -71,7 +71,7 @@ openingPositionRouter.post('/', requireAuth, async (req, res, next) => {
         if (totalInventory > 0) {
             plannedLines.push({
                 ledgerName: 'Stock-in-Hand',
-                groupCode: 'CA',
+                groupCode: 'CA-STOCK',
                 entryType: 'DR',
                 amount: Number(totalInventory.toFixed(2))
             });
@@ -263,8 +263,8 @@ openingPositionRouter.post('/', requireAuth, async (req, res, next) => {
 
                 await client.query(
                     `INSERT INTO inventory_transactions
-                     (business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                     (business_id, product_id, voucher_id, transaction_date, posting_date, quantity, unit_cost, total_value)
+                     VALUES ($1, $2, $3, $4, $4, $5, $6, $7)`,
                     [
                         businessId,
                         productId,

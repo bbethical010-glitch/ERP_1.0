@@ -11,6 +11,13 @@ const VOUCHER_PREFIX = {
 };
 
 function normalizeIsoDate(dateValue, fieldName = 'voucherDate') {
+  const toLocalIso = (value) => {
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   if (typeof dateValue === 'string') {
     const trimmed = dateValue.trim();
     if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
@@ -19,16 +26,16 @@ function normalizeIsoDate(dateValue, fieldName = 'voucherDate') {
 
     const parsed = new Date(trimmed);
     if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString().slice(0, 10);
+      return toLocalIso(parsed);
     }
   } else if (dateValue instanceof Date) {
     if (!Number.isNaN(dateValue.getTime())) {
-      return dateValue.toISOString().slice(0, 10);
+      return toLocalIso(dateValue);
     }
   } else if (typeof dateValue === 'number') {
     const parsed = new Date(dateValue);
     if (!Number.isNaN(parsed.getTime())) {
-      return parsed.toISOString().slice(0, 10);
+      return toLocalIso(parsed);
     }
   }
 
@@ -74,6 +81,35 @@ async function assertAccountsBelongToBusiness(client, businessId, lines) {
 
   if (result.rows[0].count !== accountIds.length) {
     throw httpError(400, 'One or more accounts do not belong to this business');
+  }
+}
+
+async function assertSalesVoucherShape(client, businessId, lines) {
+  const accountIds = [...new Set(lines.map((line) => line.accountId))];
+  const categories = await client.query(
+    `SELECT a.id, ag.category
+     FROM accounts a
+     JOIN account_groups ag ON ag.id = a.account_group_id
+     WHERE a.business_id = $1
+       AND a.id = ANY($2::uuid[])`,
+    [businessId, accountIds]
+  );
+  const categoryMap = new Map(categories.rows.map((row) => [row.id, row.category]));
+
+  const hasRevenueCredit = lines.some(
+    (line) => line.entryType === 'CR' && categoryMap.get(line.accountId) === 'INCOME'
+  );
+  const hasDebtorOrCashDebit = lines.some(
+    (line) =>
+      line.entryType === 'DR' &&
+      ['CURRENT_ASSET'].includes(categoryMap.get(line.accountId))
+  );
+
+  if (!hasRevenueCredit || !hasDebtorOrCashDebit) {
+    throw httpError(
+      400,
+      'Sales voucher must include CR to INCOME and DR to debtor/cash (CURRENT_ASSET)'
+    );
   }
 }
 
@@ -160,7 +196,7 @@ async function getInventorySnapshot(client, businessId, productIds, asOfDate) {
      FROM inventory_transactions
      WHERE business_id = $1
        AND product_id = ANY($2::uuid[])
-       AND transaction_date <= $3::date
+       AND posting_date <= $3::date
      GROUP BY product_id`,
     [businessId, productIds, normalizeIsoDate(asOfDate, 'transactionDate')]
   );
@@ -199,7 +235,7 @@ async function getLatestProductUnitCost(client, businessId, productId) {
     `SELECT unit_cost
      FROM inventory_transactions
      WHERE business_id = $1 AND product_id = $2
-     ORDER BY transaction_date DESC, created_at DESC
+     ORDER BY posting_date DESC, created_at DESC
      LIMIT 1`,
     [businessId, productId]
   );
@@ -212,12 +248,12 @@ async function buildFifoLots(client, businessId, productIds, asOfDate) {
   }
 
   const tx = await client.query(
-    `SELECT product_id, quantity, unit_cost, transaction_date, id
+    `SELECT product_id, quantity, unit_cost, posting_date, id
      FROM inventory_transactions
      WHERE business_id = $1
        AND product_id = ANY($2::uuid[])
-       AND transaction_date <= $3::date
-     ORDER BY transaction_date ASC, id ASC`,
+       AND posting_date <= $3::date
+     ORDER BY posting_date ASC, id ASC`,
     [businessId, productIds, normalizeIsoDate(asOfDate, 'transactionDate')]
   );
 
@@ -342,6 +378,28 @@ async function ensureAccountingLedger(client, businessId, { name, groupCode, nor
   throw httpError(500, `Failed to create ledger for ${name}`);
 }
 
+async function assertAccountCategory(client, businessId, accountId, allowedCategories, fieldLabel) {
+  const res = await client.query(
+    `SELECT ag.category
+     FROM accounts a
+     JOIN account_groups ag ON ag.id = a.account_group_id
+     WHERE a.business_id = $1
+       AND a.id = $2
+     LIMIT 1`,
+    [businessId, accountId]
+  );
+  if (res.rows.length === 0) {
+    throw httpError(400, `${fieldLabel} account not found for this business`);
+  }
+  const category = res.rows[0].category;
+  if (!allowedCategories.includes(category)) {
+    throw httpError(
+      400,
+      `${fieldLabel} account must belong to one of: ${allowedCategories.join(', ')}`
+    );
+  }
+}
+
 async function buildPurchaseDerivedEntries(client, payload) {
   if (payload.voucherType !== 'PURCHASE') {
     return payload.entries;
@@ -361,7 +419,7 @@ async function buildPurchaseDerivedEntries(client, payload) {
 
   const stockAccountId = await ensureAccountingLedger(client, payload.businessId, {
     name: 'Stock-in-Hand',
-    groupCode: 'CA',
+    groupCode: 'CA-STOCK',
     normalBalance: 'DR'
   });
 
@@ -381,6 +439,13 @@ async function buildPurchaseDerivedEntries(client, payload) {
 
     if (line.counterpartyAccountId) {
       counterpartyAccountId = line.counterpartyAccountId;
+      await assertAccountCategory(
+        client,
+        payload.businessId,
+        counterpartyAccountId,
+        ['LIABILITY', 'CURRENT_ASSET'],
+        'Counterparty'
+      );
     }
 
     if (line.lineType === 'FIXED_ASSET') {
@@ -396,6 +461,15 @@ async function buildPurchaseDerivedEntries(client, payload) {
 
       if (!assetAccountId) {
         throw httpError(400, 'Fixed asset purchase line requires assetAccountId or assetAccountName');
+      }
+      if (line.assetAccountId) {
+        await assertAccountCategory(
+          client,
+          payload.businessId,
+          line.assetAccountId,
+          ['FIXED_ASSET'],
+          'Asset'
+        );
       }
 
       entries.push({
@@ -519,6 +593,193 @@ async function applyAllocations(client, { businessId, sourceVoucherId, sourceVou
   }
 }
 
+async function reverseInventoryMovementsForVoucher(client, { businessId, sourceVoucherId, reversalVoucherId, reversalDate }) {
+  const sourceRows = await client.query(
+    `SELECT product_id AS "productId", quantity, unit_cost AS "unitCost", total_value AS "totalValue"
+     FROM inventory_transactions
+     WHERE business_id = $1
+       AND voucher_id = $2
+     ORDER BY id`,
+    [businessId, sourceVoucherId]
+  );
+
+  if (sourceRows.rows.length === 0) {
+    return;
+  }
+
+  const postingDate = normalizeIsoDate(reversalDate, 'reversalDate');
+  for (const row of sourceRows.rows) {
+    const quantity = Number(row.quantity || 0);
+    const unitCost = Number(row.unitCost || 0);
+    const totalValue = Number(row.totalValue || 0);
+    await client.query(
+      `INSERT INTO inventory_transactions
+       (business_id, product_id, voucher_id, transaction_date, posting_date, quantity, unit_cost, total_value)
+       VALUES ($1, $2, $3, $4::date, $4::date, $5, $6, $7)`,
+      [businessId, row.productId, reversalVoucherId, postingDate, -quantity, unitCost, -totalValue]
+    );
+  }
+}
+
+async function closeOutstandingForVoucher(client, { businessId, voucherId }) {
+  await client.query(
+    `UPDATE voucher_outstandings
+     SET outstanding_amount = 0,
+         status = 'CLOSED',
+         updated_at = NOW()
+     WHERE business_id = $1
+       AND voucher_id = $2`,
+    [businessId, voucherId]
+  );
+}
+
+async function unwindAllocationsForReversal(client, { businessId, sourceVoucherId }) {
+  const allocRes = await client.query(
+    `SELECT target_voucher_id AS "targetVoucherId", COALESCE(SUM(amount), 0) AS amount
+     FROM voucher_allocations
+     WHERE business_id = $1
+       AND source_voucher_id = $2
+     GROUP BY target_voucher_id`,
+    [businessId, sourceVoucherId]
+  );
+
+  for (const alloc of allocRes.rows) {
+    const amount = Number(alloc.amount || 0);
+    if (amount <= 0) continue;
+    await client.query(
+      `UPDATE voucher_outstandings
+       SET outstanding_amount = LEAST(original_amount, outstanding_amount + $1),
+           status = CASE WHEN LEAST(original_amount, outstanding_amount + $1) > 0 THEN 'OPEN' ELSE 'CLOSED' END,
+           updated_at = NOW()
+       WHERE business_id = $2
+         AND voucher_id = $3`,
+      [amount, businessId, alloc.targetVoucherId]
+    );
+  }
+}
+
+async function persistPurchaseDocument(client, params) {
+  const { businessId, voucherId, voucherDate, purchaseLines, entries } = params;
+  if (!Array.isArray(purchaseLines) || purchaseLines.length === 0) {
+    return null;
+  }
+
+  const supplierAccountId =
+    purchaseLines.find((line) => line.counterpartyAccountId)?.counterpartyAccountId ||
+    entries?.find((line) => line.entryType === 'CR')?.accountId ||
+    null;
+
+  const totalAmount = Number(
+    purchaseLines
+      .reduce((sum, line) => {
+        const quantity = Number(line.quantity || 1);
+        const unitCost = Number(line.unitCost || 0);
+        const base = quantity * unitCost;
+        const taxAmount =
+          line.taxAmount !== undefined
+            ? Number(line.taxAmount || 0)
+            : Number(((base * Number(line.taxRate || 0)) / 100).toFixed(2));
+        return sum + base + taxAmount;
+      }, 0)
+      .toFixed(2)
+  );
+
+  const pv = await client.query(
+    `INSERT INTO purchase_voucher (business_id, voucher_id, supplier_account_id, bill_date, total_amount)
+     VALUES ($1, $2, $3, $4::date, $5)
+     ON CONFLICT (voucher_id)
+     DO UPDATE SET
+       supplier_account_id = EXCLUDED.supplier_account_id,
+       bill_date = EXCLUDED.bill_date,
+       total_amount = EXCLUDED.total_amount,
+       updated_at = NOW()
+     RETURNING id`,
+    [businessId, voucherId, supplierAccountId, normalizeIsoDate(voucherDate, 'voucherDate'), totalAmount]
+  );
+  const purchaseVoucherId = pv.rows[0].id;
+
+  await client.query(`DELETE FROM purchase_lines WHERE purchase_voucher_id = $1`, [purchaseVoucherId]);
+
+  for (let i = 0; i < purchaseLines.length; i += 1) {
+    const line = purchaseLines[i];
+    const lineType = line.lineType || 'INVENTORY';
+    const quantity = Number(line.quantity || 1);
+    const unitCost = Number(line.unitCost || 0);
+    const base = Number((quantity * unitCost).toFixed(2));
+    const taxRate = Number(line.taxRate || 0);
+    const taxAmount =
+      line.taxAmount !== undefined ? Number(line.taxAmount || 0) : Number(((base * taxRate) / 100).toFixed(2));
+    const lineTotal = Number((base + taxAmount).toFixed(2));
+
+    await client.query(
+      `INSERT INTO purchase_lines (
+         business_id, purchase_voucher_id, line_no, line_type,
+         product_id, asset_account_id, description,
+         quantity, unit_cost, tax_rate, tax_amount, line_total
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        businessId,
+        purchaseVoucherId,
+        i + 1,
+        lineType,
+        lineType === 'INVENTORY' ? line.productId || null : null,
+        lineType === 'FIXED_ASSET' ? line.assetAccountId || null : null,
+        line.description || line.assetAccountName || null,
+        quantity,
+        unitCost,
+        taxRate,
+        taxAmount,
+        lineTotal
+      ]
+    );
+  }
+
+  return purchaseVoucherId;
+}
+
+async function validateInventoryFinancialSyncForVoucher(client, { businessId, voucherId }) {
+  const inventoryRes = await client.query(
+    `SELECT COALESCE(SUM(total_value), 0) AS value, COUNT(*)::int AS count
+     FROM inventory_transactions
+     WHERE business_id = $1
+       AND voucher_id = $2`,
+    [businessId, voucherId]
+  );
+  const inventoryValue = Number(inventoryRes.rows[0]?.value || 0);
+  const inventoryCount = Number(inventoryRes.rows[0]?.count || 0);
+  if (inventoryCount === 0) return;
+
+  const stockAccounts = await client.query(
+    `SELECT a.id
+     FROM accounts a
+     LEFT JOIN account_groups ag ON ag.id = a.account_group_id
+     WHERE a.business_id = $1
+       AND (LOWER(a.name) = 'stock-in-hand' OR ag.code = 'CA-STOCK')`,
+    [businessId]
+  );
+  const stockAccountIds = stockAccounts.rows.map((row) => row.id);
+  if (stockAccountIds.length === 0) {
+    throw httpError(400, 'Stock-in-Hand account is required for inventory vouchers');
+  }
+
+  const postingRes = await client.query(
+    `SELECT COALESCE(SUM(debit - credit), 0) AS value
+     FROM ledger_postings
+     WHERE business_id = $1
+       AND voucher_id = $2
+       AND account_id = ANY($3::uuid[])`,
+    [businessId, voucherId, stockAccountIds]
+  );
+  const stockPostingValue = Number(postingRes.rows[0]?.value || 0);
+  const diff = Number((inventoryValue - stockPostingValue).toFixed(2));
+  if (Math.abs(diff) > 0.01) {
+    throw httpError(
+      400,
+      `Inventory/ledger mismatch for voucher ${voucherId}. Inventory value=${inventoryValue}, Stock ledger=${stockPostingValue}`
+    );
+  }
+}
+
 async function applySalesInventoryIntegration(client, params) {
   const { businessId, voucherId, transactionId, voucherDate, inventoryLines, actorId } = params;
   if (!Array.isArray(inventoryLines) || inventoryLines.length === 0) return;
@@ -604,7 +865,7 @@ async function applySalesInventoryIntegration(client, params) {
     });
     const stockAccountId = await ensureAccountingLedger(client, businessId, {
       name: 'Stock-in-Hand',
-      groupCode: 'CA',
+      groupCode: 'CA-STOCK',
       normalBalance: 'DR'
     });
 
@@ -616,13 +877,26 @@ async function applySalesInventoryIntegration(client, params) {
       [transactionId]
     );
     let lineNo = Number(maxLineRes.rows[0]?.max_line || 0);
+    const maxVoucherLineRes = await client.query(
+      `SELECT COALESCE(MAX(line_no), 0) AS max_line
+       FROM voucher_lines
+       WHERE voucher_id = $1`,
+      [voucherId]
+    );
+    let voucherLineNo = Number(maxVoucherLineRes.rows[0]?.max_line || 0);
 
     // Post COGS (DR) and Stock-in-Hand (CR) using the same transaction & voucher
     lineNo += 1;
+    voucherLineNo += 1;
     await client.query(
       `INSERT INTO transaction_entries (transaction_id, line_no, account_id, entry_type, amount)
        VALUES ($1, $2, $3, 'DR', $4)`,
       [transactionId, lineNo, cogsAccountId, totalCost]
+    );
+    await client.query(
+      `INSERT INTO voucher_lines (voucher_id, line_no, account_id, entry_type, amount)
+       VALUES ($1, $2, $3, 'DR', $4)`,
+      [voucherId, voucherLineNo, cogsAccountId, totalCost]
     );
     await client.query(
       `INSERT INTO ledger_postings (business_id, financial_year_id, voucher_id, transaction_id, account_id, posting_date, debit, credit)
@@ -634,10 +908,16 @@ async function applySalesInventoryIntegration(client, params) {
     );
 
     lineNo += 1;
+    voucherLineNo += 1;
     await client.query(
       `INSERT INTO transaction_entries (transaction_id, line_no, account_id, entry_type, amount)
        VALUES ($1, $2, $3, 'CR', $4)`,
       [transactionId, lineNo, stockAccountId, totalCost]
+    );
+    await client.query(
+      `INSERT INTO voucher_lines (voucher_id, line_no, account_id, entry_type, amount)
+       VALUES ($1, $2, $3, 'CR', $4)`,
+      [voucherId, voucherLineNo, stockAccountId, totalCost]
     );
     await client.query(
       `INSERT INTO ledger_postings (business_id, financial_year_id, voucher_id, transaction_id, account_id, posting_date, debit, credit)
@@ -654,8 +934,8 @@ async function applySalesInventoryIntegration(client, params) {
     const { quantity, unitCost, cost } = info;
     await client.query(
       `INSERT INTO inventory_transactions
-       (business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (business_id, product_id, voucher_id, transaction_date, posting_date, quantity, unit_cost, total_value)
+       VALUES ($1, $2, $3, $4, $4, $5, $6, $7)`,
       [businessId, productId, voucherId, postingDate, -quantity, unitCost, -cost]
     );
   }
@@ -710,8 +990,8 @@ async function applyPurchaseInventoryIntegration(client, params) {
 
     await client.query(
       `INSERT INTO inventory_transactions
-       (business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       (business_id, product_id, voucher_id, transaction_date, posting_date, quantity, unit_cost, total_value)
+       VALUES ($1, $2, $3, $4, $4, $5, $6, $7)`,
       [businessId, line.productId, voucherId, postingDate, qty, unitCost, total]
     );
   }
@@ -883,6 +1163,9 @@ export async function createVoucher(payload) {
     const effectiveEntries = await buildPurchaseDerivedEntries(client, payload);
     ensureLines(effectiveEntries);
     await assertAccountsBelongToBusiness(client, payload.businessId, effectiveEntries);
+    if (payload.voucherType === 'SALES') {
+      await assertSalesVoucherShape(client, payload.businessId, effectiveEntries);
+    }
     const voucherDate = normalizeIsoDate(payload.voucherDate, 'voucherDate');
 
     const mode = payload.mode === 'DRAFT' ? 'DRAFT' : 'POST';
@@ -935,6 +1218,10 @@ export async function createVoucher(payload) {
         inventoryLines: payload.inventoryLines,
         actorId: payload.actorId
       });
+      await validateInventoryFinancialSyncForVoucher(client, {
+        businessId: payload.businessId,
+        voucherId
+      });
     }
     if (
       payload.voucherType === 'PURCHASE' &&
@@ -948,6 +1235,20 @@ export async function createVoucher(payload) {
         inventoryLines: payload.inventoryLines,
         purchaseLines: payload.purchaseLines,
         actorId: payload.actorId
+      });
+      await validateInventoryFinancialSyncForVoucher(client, {
+        businessId: payload.businessId,
+        voucherId
+      });
+    }
+
+    if (payload.voucherType === 'PURCHASE' && Array.isArray(payload.purchaseLines) && payload.purchaseLines.length > 0) {
+      await persistPurchaseDocument(client, {
+        businessId: payload.businessId,
+        voucherId,
+        voucherDate,
+        purchaseLines: payload.purchaseLines,
+        entries: effectiveEntries
       });
     }
 
@@ -1121,6 +1422,9 @@ export async function postVoucher(voucherId, payload) {
     if (effectiveEntries) {
       ensureLines(effectiveEntries);
       await assertAccountsBelongToBusiness(client, payload.businessId, effectiveEntries);
+      if (resolvedVoucherType === 'SALES') {
+        await assertSalesVoucherShape(client, payload.businessId, effectiveEntries);
+      }
     }
 
     await client.query(
@@ -1154,6 +1458,10 @@ export async function postVoucher(voucherId, payload) {
         inventoryLines: payload.inventoryLines,
         actorId: payload.actorId
       });
+      await validateInventoryFinancialSyncForVoucher(client, {
+        businessId: payload.businessId,
+        voucherId
+      });
     }
 
     if (
@@ -1168,6 +1476,21 @@ export async function postVoucher(voucherId, payload) {
         inventoryLines: payload.inventoryLines,
         purchaseLines: payload.purchaseLines,
         actorId: payload.actorId
+      });
+      await validateInventoryFinancialSyncForVoucher(client, {
+        businessId: payload.businessId,
+        voucherId
+      });
+    }
+
+    if (resolvedVoucherType === 'PURCHASE' && Array.isArray(payload.purchaseLines) && payload.purchaseLines.length > 0) {
+      const linesForPurchase = effectiveEntries || (await readVoucherLines(client, voucherId, result.transactionId));
+      await persistPurchaseDocument(client, {
+        businessId: payload.businessId,
+        voucherId,
+        voucherDate: resolvedVoucherDate,
+        purchaseLines: payload.purchaseLines,
+        entries: linesForPurchase
       });
     }
 
@@ -1301,6 +1624,24 @@ export async function reverseVoucher(voucherId, payload) {
     const reversalVoucherId = reversalVoucherRes.rows[0].id;
     await insertVoucherLines(client, reversalVoucherId, reversedLines);
     await postDraftInternal(client, reversalVoucherId, payload.actorId, reversalNumber);
+    await reverseInventoryMovementsForVoucher(client, {
+      businessId: payload.businessId,
+      sourceVoucherId: voucherId,
+      reversalVoucherId,
+      reversalDate
+    });
+    await closeOutstandingForVoucher(client, {
+      businessId: payload.businessId,
+      voucherId
+    });
+    await unwindAllocationsForReversal(client, {
+      businessId: payload.businessId,
+      sourceVoucherId: voucherId
+    });
+    await validateInventoryFinancialSyncForVoucher(client, {
+      businessId: payload.businessId,
+      voucherId: reversalVoucherId
+    });
 
     await client.query(
       `UPDATE vouchers
