@@ -10,6 +10,20 @@ function formatAmount(value) {
   return Number(value || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+function fyStart(dateIso) {
+  const [yearStr, monthStr] = String(dateIso || '').slice(0, 10).split('-');
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  if (!year || !month) return new Date().toISOString().slice(0, 4) + '-04-01';
+  const startYear = month >= 4 ? year : year - 1;
+  return `${startYear}-04-01`;
+}
+
+function normalizeRange(from, to) {
+  if (!from || !to) return { from, to };
+  return from <= to ? { from, to } : { from: to, to: from };
+}
+
 /* ── Trial Balance ──────────────────────────── */
 
 export function TrialBalancePanel() {
@@ -17,7 +31,7 @@ export function TrialBalancePanel() {
   const { user } = useAuth();
   const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(today.slice(0, 4) + '-04-01');
+  const [from, setFrom] = useState(fyStart(today));
   const [to, setTo] = useState(today);
 
   // Internal drilldown stack
@@ -27,9 +41,12 @@ export function TrialBalancePanel() {
   const [activeIndex, setActiveIndex] = useState(0);
 
   const { data } = useQuery({
-    queryKey: ['trial-balance', businessId, from, to],
+    queryKey: ['trial-balance', businessId, normalizeRange(from, to).from, normalizeRange(from, to).to],
     enabled: Boolean(businessId),
-    queryFn: () => api.get(`/reports/trial-balance?from=${from}&to=${to}`),
+    queryFn: () => {
+      const range = normalizeRange(from, to);
+      return api.get(`/reports/trial-balance?from=${range.from}&to=${range.to}`);
+    },
   });
 
   const grouped = data?.grouped || {};
@@ -161,15 +178,18 @@ export function ProfitLossPanel() {
   const { user } = useAuth();
   const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(today.slice(0, 4) + '-04-01');
+  const [from, setFrom] = useState(fyStart(today));
   const [to, setTo] = useState(today);
 
   const [activeIndex, setActiveIndex] = useState(0);
 
   const { data } = useQuery({
-    queryKey: ['profit-loss', businessId, from, to],
+    queryKey: ['profit-loss', businessId, normalizeRange(from, to).from, normalizeRange(from, to).to],
     enabled: Boolean(businessId),
-    queryFn: () => api.get(`/reports/profit-loss?from=${from}&to=${to}`),
+    queryFn: () => {
+      const range = normalizeRange(from, to);
+      return api.get(`/reports/profit-loss?from=${range.from}&to=${range.to}`);
+    },
   });
 
   const rows = [
@@ -237,15 +257,18 @@ export function BalanceSheetPanel() {
   const { user } = useAuth();
   const businessId = user?.businessId;
   const today = new Date().toISOString().slice(0, 10);
-  const [from, setFrom] = useState(today.slice(0, 4) + '-04-01');
+  const [from, setFrom] = useState(fyStart(today));
   const [to, setTo] = useState(today);
 
   const [activeIndex, setActiveIndex] = useState(0);
 
   const { data } = useQuery({
-    queryKey: ['balance-sheet', businessId, from, to],
+    queryKey: ['balance-sheet', businessId, normalizeRange(from, to).from, normalizeRange(from, to).to],
     enabled: Boolean(businessId),
-    queryFn: () => api.get(`/reports/balance-sheet?from=${from}&to=${to}`),
+    queryFn: () => {
+      const range = normalizeRange(from, to);
+      return api.get(`/reports/balance-sheet?from=${range.from}&to=${range.to}`);
+    },
   });
 
   const rows = [

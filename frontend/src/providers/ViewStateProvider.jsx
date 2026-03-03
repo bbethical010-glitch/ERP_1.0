@@ -26,6 +26,7 @@ export const SCREENS = {
     TRIAL_BALANCE: 'trial-balance',
     PROFIT_LOSS: 'profit-loss',
     BALANCE_SHEET: 'balance-sheet',
+    INVENTORY_SUMMARY: 'inventory-summary',
     USERS: 'users',
     USER_CREATE: 'user-create',
     CHANGE_PASSWORD: 'change-password',

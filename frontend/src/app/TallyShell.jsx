@@ -15,6 +15,7 @@ import { VoucherRegisterPanel } from '../features/vouchers/VoucherRegisterPanel'
 import { LedgerPanel } from '../features/ledger/LedgerPanel';
 import { DaybookPanel } from '../features/daybook/DaybookPanel';
 import { TrialBalancePanel, ProfitLossPanel, BalanceSheetPanel } from '../features/reports/ReportPanels';
+import { InventorySummaryPanel } from '../features/inventory/InventorySummaryPanel';
 import { UsersPanel } from '../features/users/UsersPanel';
 import { ChangePasswordPanel } from '../features/users/ChangePasswordPanel';
 import { CompanySetupPanel } from '../features/company/CompanySetupPanel';
@@ -94,6 +95,7 @@ export function TallyShell() {
                 '/reports/trial-balance': SCREENS.TRIAL_BALANCE,
                 '/reports/profit-loss': SCREENS.PROFIT_LOSS,
                 '/reports/balance-sheet': SCREENS.BALANCE_SHEET,
+                '/inventory': SCREENS.INVENTORY_SUMMARY,
                 '/users': SCREENS.USERS,
                 '/change-password': SCREENS.CHANGE_PASSWORD,
                 '/company-setup': SCREENS.COMPANY_SETUP,
@@ -115,6 +117,7 @@ export function TallyShell() {
             '/reports/trial-balance': SCREENS.TRIAL_BALANCE,
             '/reports/profit-loss': SCREENS.PROFIT_LOSS,
             '/reports/balance-sheet': SCREENS.BALANCE_SHEET,
+            '/inventory': SCREENS.INVENTORY_SUMMARY,
             '/users': SCREENS.USERS,
             '/change-password': SCREENS.CHANGE_PASSWORD,
             '/company-setup': SCREENS.COMPANY_SETUP,
@@ -160,6 +163,8 @@ export function TallyShell() {
                 return <ProfitLossPanel />;
             case SCREENS.BALANCE_SHEET:
                 return <BalanceSheetPanel />;
+            case SCREENS.INVENTORY_SUMMARY:
+                return <InventorySummaryPanel asOf={current.params?.asOf} />;
             case SCREENS.USERS:
                 return <UsersPanel />;
             case SCREENS.CHANGE_PASSWORD:
@@ -182,6 +187,7 @@ export function TallyShell() {
         [SCREENS.TRIAL_BALANCE]: 'Trial Balance',
         [SCREENS.PROFIT_LOSS]: 'Profit & Loss',
         [SCREENS.BALANCE_SHEET]: 'Balance Sheet',
+        [SCREENS.INVENTORY_SUMMARY]: 'Stock Summary',
         [SCREENS.USERS]: 'Users',
         [SCREENS.CHANGE_PASSWORD]: 'Change Password',
         [SCREENS.COMPANY_SETUP]: 'Company Setup',

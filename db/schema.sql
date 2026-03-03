@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS businesses (
   base_currency CHAR(3) NOT NULL DEFAULT 'INR',
   address TEXT,
   financial_year_start DATE,
+  allow_negative_stock BOOLEAN NOT NULL DEFAULT FALSE,
+  inventory_costing_method TEXT NOT NULL DEFAULT 'WEIGHTED_AVERAGE'
+    CHECK (inventory_costing_method IN ('WEIGHTED_AVERAGE', 'FIFO')),
   is_initialized BOOLEAN NOT NULL DEFAULT FALSE,
   updated_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -46,6 +49,21 @@ CREATE TABLE IF NOT EXISTS businesses (
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS financial_year_start DATE;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS allow_negative_stock BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS inventory_costing_method TEXT NOT NULL DEFAULT 'WEIGHTED_AVERAGE';
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'businesses_inventory_costing_method_check'
+      AND conrelid = 'businesses'::regclass
+  ) THEN
+    ALTER TABLE businesses
+    ADD CONSTRAINT businesses_inventory_costing_method_check
+    CHECK (inventory_costing_method IN ('WEIGHTED_AVERAGE', 'FIFO'));
+  END IF;
+END $$;
 
 
 CREATE TABLE IF NOT EXISTS app_users (
@@ -177,6 +195,9 @@ CREATE TABLE IF NOT EXISTS financial_years (
   start_date DATE NOT NULL,
   end_date DATE NOT NULL,
   is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+  closed_at TIMESTAMPTZ,
+  closed_by TEXT,
+  closing_voucher_id UUID REFERENCES vouchers(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (business_id, label)
 );
@@ -193,6 +214,9 @@ CREATE TABLE IF NOT EXISTS ledger_postings (
   posting_date DATE NOT NULL,
   debit NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (debit >= 0),
   credit NUMERIC(18,2) NOT NULL DEFAULT 0 CHECK (credit >= 0),
+  reconciled BOOLEAN NOT NULL DEFAULT FALSE,
+  reconciled_at TIMESTAMPTZ,
+  reconciled_by TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CHECK ((debit > 0 AND credit = 0) OR (credit > 0 AND debit = 0))
 );
@@ -323,6 +347,9 @@ CREATE TABLE IF NOT EXISTS products (
   name TEXT NOT NULL,
   sku TEXT,
   category TEXT,
+  product_type TEXT NOT NULL DEFAULT 'INVENTORY'
+    CHECK (product_type IN ('INVENTORY', 'FIXED_ASSET')),
+  reorder_level NUMERIC(10,2) NOT NULL DEFAULT 0,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   UNIQUE (business_id, sku)
 );
@@ -340,3 +367,34 @@ CREATE TABLE IF NOT EXISTS inventory_transactions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_inventory_tx_business_product ON inventory_transactions (business_id, product_id);
+
+CREATE TABLE IF NOT EXISTS voucher_outstandings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  voucher_id UUID NOT NULL UNIQUE REFERENCES vouchers(id) ON DELETE CASCADE,
+  party_account_id UUID REFERENCES accounts(id) ON DELETE SET NULL,
+  voucher_type voucher_type NOT NULL CHECK (voucher_type IN ('SALES', 'PURCHASE')),
+  voucher_date DATE NOT NULL,
+  due_date DATE,
+  original_amount NUMERIC(18,2) NOT NULL CHECK (original_amount >= 0),
+  outstanding_amount NUMERIC(18,2) NOT NULL CHECK (outstanding_amount >= 0),
+  status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'CLOSED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_voucher_outstandings_business_type_status
+  ON voucher_outstandings (business_id, voucher_type, status, voucher_date);
+
+CREATE TABLE IF NOT EXISTS voucher_allocations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  business_id UUID NOT NULL REFERENCES businesses(id) ON DELETE CASCADE,
+  source_voucher_id UUID NOT NULL REFERENCES vouchers(id) ON DELETE CASCADE,
+  target_voucher_id UUID NOT NULL REFERENCES vouchers(id) ON DELETE CASCADE,
+  amount NUMERIC(18,2) NOT NULL CHECK (amount > 0),
+  allocation_date DATE NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_voucher_allocations_business_target
+  ON voucher_allocations (business_id, target_voucher_id, allocation_date);

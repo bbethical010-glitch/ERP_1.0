@@ -147,6 +147,592 @@ async function generateVoucherNumber(client, businessId, voucherType, voucherDat
   return `${prefix}-${String(next).padStart(4, '0')}`;
 }
 
+async function getInventorySnapshot(client, businessId, productIds, asOfDate) {
+  if (!Array.isArray(productIds) || productIds.length === 0) {
+    return new Map();
+  }
+
+  const res = await client.query(
+    `SELECT
+       product_id,
+       COALESCE(SUM(quantity), 0) AS qty,
+       COALESCE(SUM(total_value), 0) AS value
+     FROM inventory_transactions
+     WHERE business_id = $1
+       AND product_id = ANY($2::uuid[])
+       AND transaction_date <= $3::date
+     GROUP BY product_id`,
+    [businessId, productIds, normalizeIsoDate(asOfDate, 'transactionDate')]
+  );
+
+  const map = new Map();
+  for (const row of res.rows) {
+    const qty = Number(row.qty || 0);
+    const value = Number(row.value || 0);
+    map.set(row.product_id, {
+      quantity: qty,
+      totalValue: value,
+      avgCost: qty === 0 ? 0 : value / qty
+    });
+  }
+  return map;
+}
+
+async function getBusinessInventorySettings(client, businessId) {
+  const res = await client.query(
+    `SELECT
+       inventory_costing_method AS "costingMethod",
+       allow_negative_stock AS "allowNegativeStock"
+     FROM businesses
+     WHERE id = $1
+     LIMIT 1`,
+    [businessId]
+  );
+  return {
+    costingMethod: res.rows[0]?.costingMethod || 'WEIGHTED_AVERAGE',
+    allowNegativeStock: Boolean(res.rows[0]?.allowNegativeStock)
+  };
+}
+
+async function getLatestProductUnitCost(client, businessId, productId) {
+  const res = await client.query(
+    `SELECT unit_cost
+     FROM inventory_transactions
+     WHERE business_id = $1 AND product_id = $2
+     ORDER BY transaction_date DESC, created_at DESC
+     LIMIT 1`,
+    [businessId, productId]
+  );
+  return Number(res.rows[0]?.unit_cost || 0);
+}
+
+async function buildFifoLots(client, businessId, productIds, asOfDate) {
+  if (!Array.isArray(productIds) || productIds.length === 0) {
+    return new Map();
+  }
+
+  const tx = await client.query(
+    `SELECT product_id, quantity, unit_cost, transaction_date, id
+     FROM inventory_transactions
+     WHERE business_id = $1
+       AND product_id = ANY($2::uuid[])
+       AND transaction_date <= $3::date
+     ORDER BY transaction_date ASC, id ASC`,
+    [businessId, productIds, normalizeIsoDate(asOfDate, 'transactionDate')]
+  );
+
+  const lotsByProduct = new Map();
+  for (const productId of productIds) {
+    lotsByProduct.set(productId, []);
+  }
+
+  for (const row of tx.rows) {
+    const productId = row.product_id;
+    const quantity = Number(row.quantity || 0);
+    const unitCost = Number(row.unit_cost || 0);
+    const lots = lotsByProduct.get(productId) || [];
+
+    if (quantity > 0) {
+      lots.push({ qty: quantity, unitCost });
+      lotsByProduct.set(productId, lots);
+      continue;
+    }
+
+    if (quantity < 0) {
+      let outward = Math.abs(quantity);
+      for (const lot of lots) {
+        if (outward <= 0) break;
+        const consume = Math.min(lot.qty, outward);
+        lot.qty -= consume;
+        outward -= consume;
+      }
+      const remainingLots = lots.filter((lot) => lot.qty > 0);
+      lotsByProduct.set(productId, remainingLots);
+    }
+  }
+
+  return lotsByProduct;
+}
+
+function computeFifoCostFromLots(lots, soldQty) {
+  let remaining = Number(soldQty);
+  let cost = 0;
+  let available = 0;
+  for (const lot of lots) {
+    available += Number(lot.qty || 0);
+  }
+  for (const lot of lots) {
+    if (remaining <= 0) break;
+    const consume = Math.min(Number(lot.qty || 0), remaining);
+    cost += consume * Number(lot.unitCost || 0);
+    remaining -= consume;
+  }
+  return {
+    availableQty: available,
+    totalCost: Number(cost.toFixed(2)),
+    remainingQtyRequest: remaining
+  };
+}
+
+async function ensureAccountingLedger(client, businessId, { name, groupCode, normalBalance }) {
+  const existing = await client.query(
+    `SELECT a.id
+     FROM accounts a
+     JOIN account_groups ag ON ag.id = a.account_group_id
+     WHERE a.business_id = $1 AND a.name = $2`,
+    [businessId, name]
+  );
+  if (existing.rows[0]) {
+    return existing.rows[0].id;
+  }
+
+  // Ensure the requested group exists; if not, create a sensible child group
+  // under its parent (e.g. EX-IND under EX, CA-STOCK under CA).
+  let groupRes = await client.query(
+    `SELECT id, code, category, parent_group_id
+     FROM account_groups
+     WHERE business_id = $1 AND code = $2`,
+    [businessId, groupCode]
+  );
+
+  if (!groupRes.rows[0]) {
+    // Attempt to derive parent code from prefix before first dash, e.g. "EX" from "EX-IND"
+    const parentCode = groupCode.includes('-') ? groupCode.split('-')[0] : null;
+    if (!parentCode) {
+      throw httpError(400, `Required account group not found for ${name} (${groupCode})`);
+    }
+
+    const parentRes = await client.query(
+      `SELECT id, category
+       FROM account_groups
+       WHERE business_id = $1 AND code = $2`,
+      [businessId, parentCode]
+    );
+    if (!parentRes.rows[0]) {
+      throw httpError(400, `Required parent account group not found for ${name} (${parentCode})`);
+    }
+
+    const parent = parentRes.rows[0];
+    const insertedGroup = await client.query(
+      `INSERT INTO account_groups (business_id, name, code, category, parent_group_id, is_system)
+       VALUES ($1, $2, $3, $4, $5, TRUE)
+       RETURNING id, code, category, parent_group_id`,
+      [businessId, name, groupCode, parent.category, parent.id]
+    );
+    groupRes.rows[0] = insertedGroup.rows[0];
+  }
+
+  const groupId = groupRes.rows[0].id;
+
+  const baseCode = name.toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 16) || 'LEDGER';
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = attempt === 0 ? baseCode : `${baseCode}-${String(Date.now()).slice(-4)}${attempt}`;
+    try {
+      const inserted = await client.query(
+        `INSERT INTO accounts (business_id, account_group_id, code, name, normal_balance)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id`,
+        [businessId, groupId, code, name, normalBalance]
+      );
+      return inserted.rows[0].id;
+    } catch (error) {
+      if (error?.code !== '23505') throw error;
+    }
+  }
+  throw httpError(500, `Failed to create ledger for ${name}`);
+}
+
+async function buildPurchaseDerivedEntries(client, payload) {
+  if (payload.voucherType !== 'PURCHASE') {
+    return payload.entries;
+  }
+
+  if (Array.isArray(payload.entries) && payload.entries.length > 0) {
+    return payload.entries;
+  }
+
+  if (!Array.isArray(payload.purchaseLines) || payload.purchaseLines.length === 0) {
+    return payload.entries;
+  }
+
+  const entries = [];
+  let totalDebit = 0;
+  let counterpartyAccountId = null;
+
+  const stockAccountId = await ensureAccountingLedger(client, payload.businessId, {
+    name: 'Stock-in-Hand',
+    groupCode: 'CA',
+    normalBalance: 'DR'
+  });
+
+  for (const line of payload.purchaseLines) {
+    const qty = Number(line.quantity || 1);
+    const unitCost = Number(line.unitCost || 0);
+    const taxAmount =
+      line.taxAmount !== undefined
+        ? Number(line.taxAmount || 0)
+        : Number((((unitCost * qty) * Number(line.taxRate || 0)) / 100).toFixed(2));
+    const baseAmount = Number((qty * unitCost).toFixed(2));
+    const grossAmount = Number((baseAmount + taxAmount).toFixed(2));
+
+    if (grossAmount <= 0) {
+      throw httpError(400, 'Invalid purchase line amount');
+    }
+
+    if (line.counterpartyAccountId) {
+      counterpartyAccountId = line.counterpartyAccountId;
+    }
+
+    if (line.lineType === 'FIXED_ASSET') {
+      const assetAccountId =
+        line.assetAccountId ||
+        (line.assetAccountName
+          ? await ensureAccountingLedger(client, payload.businessId, {
+              name: line.assetAccountName.trim(),
+              groupCode: 'FA',
+              normalBalance: 'DR'
+            })
+          : null);
+
+      if (!assetAccountId) {
+        throw httpError(400, 'Fixed asset purchase line requires assetAccountId or assetAccountName');
+      }
+
+      entries.push({
+        accountId: assetAccountId,
+        entryType: 'DR',
+        amount: grossAmount
+      });
+      totalDebit += grossAmount;
+      continue;
+    }
+
+    // Default: inventory line
+    entries.push({
+      accountId: stockAccountId,
+      entryType: 'DR',
+      amount: grossAmount
+    });
+    totalDebit += grossAmount;
+  }
+
+  if (!counterpartyAccountId) {
+    throw httpError(400, 'Purchase lines require counterpartyAccountId to create balancing credit');
+  }
+
+  entries.push({
+    accountId: counterpartyAccountId,
+    entryType: 'CR',
+    amount: Number(totalDebit.toFixed(2))
+  });
+
+  return entries;
+}
+
+async function upsertOutstandingForInvoice(client, { businessId, voucherId, voucherType, voucherDate, lines }) {
+  if (!['SALES', 'PURCHASE'].includes(voucherType)) {
+    return;
+  }
+
+  const totals = computeTotals(lines);
+  const originalAmount = voucherType === 'SALES' ? Number(totals.credit.toFixed(2)) : Number(totals.debit.toFixed(2));
+  if (originalAmount <= 0) {
+    return;
+  }
+
+  // Best-effort party derivation: first opposite-side line
+  const partyLine = lines.find((line) => {
+    if (voucherType === 'SALES') return line.entryType === 'DR';
+    return line.entryType === 'CR';
+  });
+
+  await client.query(
+    `INSERT INTO voucher_outstandings (
+       business_id, voucher_id, party_account_id, voucher_type, voucher_date, due_date, original_amount, outstanding_amount, status
+     ) VALUES ($1, $2, $3, $4::voucher_type, $5::date, $5::date, $6, $6, 'OPEN')
+     ON CONFLICT (voucher_id)
+     DO UPDATE SET
+       party_account_id = EXCLUDED.party_account_id,
+       original_amount = EXCLUDED.original_amount,
+       outstanding_amount = EXCLUDED.outstanding_amount,
+       status = CASE WHEN EXCLUDED.outstanding_amount = 0 THEN 'CLOSED' ELSE 'OPEN' END,
+       updated_at = NOW()`,
+    [businessId, voucherId, partyLine?.accountId || null, voucherType, voucherDate, originalAmount]
+  );
+}
+
+async function applyAllocations(client, { businessId, sourceVoucherId, sourceVoucherType, allocations, allocationDate }) {
+  if (!Array.isArray(allocations) || allocations.length === 0) {
+    return;
+  }
+  if (!['RECEIPT', 'PAYMENT'].includes(sourceVoucherType)) {
+    throw httpError(400, 'Allocations are only allowed for RECEIPT or PAYMENT vouchers');
+  }
+
+  for (const allocation of allocations) {
+    const amount = Number(allocation.amount || 0);
+    if (amount <= 0) {
+      throw httpError(400, 'Allocation amount must be greater than zero');
+    }
+
+    const target = await client.query(
+      `SELECT voucher_id AS "voucherId",
+              voucher_type AS "voucherType",
+              outstanding_amount AS "outstandingAmount",
+              status
+       FROM voucher_outstandings
+       WHERE business_id = $1
+         AND voucher_id = $2
+       FOR UPDATE`,
+      [businessId, allocation.targetVoucherId]
+    );
+
+    if (target.rows.length === 0) {
+      throw httpError(404, `Outstanding voucher not found: ${allocation.targetVoucherId}`);
+    }
+
+    const targetRow = target.rows[0];
+    const validTarget = sourceVoucherType === 'RECEIPT' ? 'SALES' : 'PURCHASE';
+    if (targetRow.voucherType !== validTarget) {
+      throw httpError(400, `Invalid allocation target for ${sourceVoucherType}`);
+    }
+
+    if (amount > Number(targetRow.outstandingAmount || 0)) {
+      throw httpError(400, `Allocation exceeds outstanding amount for voucher ${allocation.targetVoucherId}`);
+    }
+
+    await client.query(
+      `INSERT INTO voucher_allocations (business_id, source_voucher_id, target_voucher_id, amount, allocation_date)
+       VALUES ($1, $2, $3, $4, $5::date)`,
+      [businessId, sourceVoucherId, allocation.targetVoucherId, amount, normalizeIsoDate(allocationDate, 'allocationDate')]
+    );
+
+    await client.query(
+      `UPDATE voucher_outstandings
+       SET outstanding_amount = GREATEST(0, outstanding_amount - $1),
+           status = CASE WHEN GREATEST(0, outstanding_amount - $1) = 0 THEN 'CLOSED' ELSE 'OPEN' END,
+           updated_at = NOW()
+       WHERE business_id = $2
+         AND voucher_id = $3`,
+      [amount, businessId, allocation.targetVoucherId]
+    );
+  }
+}
+
+async function applySalesInventoryIntegration(client, params) {
+  const { businessId, voucherId, transactionId, voucherDate, inventoryLines, actorId } = params;
+  if (!Array.isArray(inventoryLines) || inventoryLines.length === 0) return;
+
+  const postingDate = normalizeIsoDate(voucherDate, 'voucherDate');
+  const settings = await getBusinessInventorySettings(client, businessId);
+
+  // Aggregate quantities per product
+  const aggregate = new Map();
+  for (const line of inventoryLines) {
+    if (!line?.productId || !Number.isFinite(Number(line.quantity)) || Number(line.quantity) <= 0) {
+      throw httpError(400, 'Invalid inventory line in sales voucher');
+    }
+    const qty = Number(line.quantity);
+    const prev = aggregate.get(line.productId) || 0;
+    aggregate.set(line.productId, prev + qty);
+  }
+
+  const productIds = [...aggregate.keys()];
+  const snapshot = await getInventorySnapshot(client, businessId, productIds, postingDate);
+  const fifoLotsByProduct =
+    settings.costingMethod === 'FIFO'
+      ? await buildFifoLots(client, businessId, productIds, postingDate)
+      : null;
+
+  let totalCost = 0;
+  const perProductCost = new Map();
+
+  for (const [productId, soldQty] of aggregate.entries()) {
+    const info = snapshot.get(productId);
+    const availableQty = info?.quantity || 0;
+    const avgCost = info?.avgCost || 0;
+
+    if (availableQty < soldQty && !settings.allowNegativeStock) {
+      throw httpError(
+        400,
+        `Insufficient stock for product ${productId}. Available: ${availableQty}, attempted sale: ${soldQty}`
+      );
+    }
+
+    let unitCost = avgCost;
+    let cost = Number((soldQty * unitCost).toFixed(2));
+
+    if (settings.costingMethod === 'FIFO') {
+      const lots = fifoLotsByProduct?.get(productId) || [];
+      const fifo = computeFifoCostFromLots(lots, soldQty);
+      if (fifo.availableQty < soldQty && !settings.allowNegativeStock) {
+        throw httpError(
+          400,
+          `Insufficient stock for product ${productId}. Available: ${fifo.availableQty}, attempted sale: ${soldQty}`
+        );
+      }
+      if (fifo.totalCost > 0) {
+        cost = fifo.totalCost;
+        unitCost = Number((cost / soldQty).toFixed(6));
+      }
+    }
+
+    if (cost <= 0 || unitCost <= 0) {
+      // Fallback when negative stock allowed or historical cost not available.
+      const latest = await getLatestProductUnitCost(client, businessId, productId);
+      if (latest > 0) {
+        unitCost = latest;
+        cost = Number((soldQty * latest).toFixed(2));
+      } else if (!settings.allowNegativeStock) {
+        throw httpError(400, `Cannot compute cost for product ${productId}; cost basis unavailable`);
+      } else {
+        unitCost = 0;
+        cost = 0;
+      }
+    }
+
+    totalCost += cost;
+    perProductCost.set(productId, { quantity: soldQty, unitCost, cost });
+  }
+
+  if (totalCost > 0) {
+    // Ensure COGS and Stock-in-Hand ledgers exist
+    const cogsAccountId = await ensureAccountingLedger(client, businessId, {
+      name: 'Cost of Goods Sold',
+      groupCode: 'EX-IND',
+      normalBalance: 'DR'
+    });
+    const stockAccountId = await ensureAccountingLedger(client, businessId, {
+      name: 'Stock-in-Hand',
+      groupCode: 'CA',
+      normalBalance: 'DR'
+    });
+
+    // Determine starting line number
+    const maxLineRes = await client.query(
+      `SELECT COALESCE(MAX(line_no), 0) AS max_line
+       FROM transaction_entries
+       WHERE transaction_id = $1`,
+      [transactionId]
+    );
+    let lineNo = Number(maxLineRes.rows[0]?.max_line || 0);
+
+    // Post COGS (DR) and Stock-in-Hand (CR) using the same transaction & voucher
+    lineNo += 1;
+    await client.query(
+      `INSERT INTO transaction_entries (transaction_id, line_no, account_id, entry_type, amount)
+       VALUES ($1, $2, $3, 'DR', $4)`,
+      [transactionId, lineNo, cogsAccountId, totalCost]
+    );
+    await client.query(
+      `INSERT INTO ledger_postings (business_id, financial_year_id, voucher_id, transaction_id, account_id, posting_date, debit, credit)
+       SELECT $1, financial_year_id, $2, $3, $4, $5, $6, 0
+       FROM ledger_postings
+       WHERE voucher_id = $2
+       LIMIT 1`,
+      [businessId, voucherId, transactionId, cogsAccountId, postingDate, totalCost]
+    );
+
+    lineNo += 1;
+    await client.query(
+      `INSERT INTO transaction_entries (transaction_id, line_no, account_id, entry_type, amount)
+       VALUES ($1, $2, $3, 'CR', $4)`,
+      [transactionId, lineNo, stockAccountId, totalCost]
+    );
+    await client.query(
+      `INSERT INTO ledger_postings (business_id, financial_year_id, voucher_id, transaction_id, account_id, posting_date, debit, credit)
+       SELECT $1, financial_year_id, $2, $3, $4, $5, 0, $6
+       FROM ledger_postings
+       WHERE voucher_id = $2
+       LIMIT 1`,
+      [businessId, voucherId, transactionId, stockAccountId, postingDate, totalCost]
+    );
+  }
+
+  // Insert inventory movements (negative quantity for sales)
+  for (const [productId, info] of perProductCost.entries()) {
+    const { quantity, unitCost, cost } = info;
+    await client.query(
+      `INSERT INTO inventory_transactions
+       (business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [businessId, productId, voucherId, postingDate, -quantity, unitCost, -cost]
+    );
+  }
+
+  await insertAuditLog(client, {
+    businessId,
+    actorId,
+    action: 'SALES_INVENTORY_APPLIED',
+    entityType: 'voucher',
+    entityId: voucherId,
+    metadata: { totalCost, costingMethod: settings.costingMethod, products: [...perProductCost.entries()] }
+  });
+}
+
+async function applyPurchaseInventoryIntegration(client, params) {
+  const { businessId, voucherId, voucherDate, inventoryLines, purchaseLines, actorId } = params;
+  const normalizedInventoryLines = Array.isArray(purchaseLines) && purchaseLines.length > 0
+    ? purchaseLines
+        .filter((line) => (line.lineType || 'INVENTORY') === 'INVENTORY')
+        .map((line) => ({
+          productId: line.productId,
+          quantity: Number(line.quantity || 0),
+          unitCost: Number(line.unitCost || 0),
+          taxAmount:
+            line.taxAmount !== undefined
+              ? Number(line.taxAmount || 0)
+              : Number((((Number(line.quantity || 0) * Number(line.unitCost || 0)) * Number(line.taxRate || 0)) / 100).toFixed(2))
+        }))
+    : (Array.isArray(inventoryLines) ? inventoryLines : []);
+  if (normalizedInventoryLines.length === 0) return;
+
+  const postingDate = normalizeIsoDate(voucherDate, 'voucherDate');
+
+  for (const line of normalizedInventoryLines) {
+    if (
+      !line?.productId ||
+      !Number.isFinite(Number(line.quantity)) ||
+      Number(line.quantity) <= 0 ||
+      !Number.isFinite(Number(line.unitCost)) ||
+      Number(line.unitCost) <= 0
+    ) {
+      throw httpError(400, 'Invalid inventory line in purchase voucher');
+    }
+  }
+
+  for (const line of normalizedInventoryLines) {
+    const qty = Number(line.quantity);
+    const unitCost = Number(line.unitCost);
+    const base = Number((qty * unitCost).toFixed(2));
+    const taxAmount = Number(line.taxAmount || 0);
+    const total = Number((base + taxAmount).toFixed(2));
+
+    await client.query(
+      `INSERT INTO inventory_transactions
+       (business_id, product_id, voucher_id, transaction_date, quantity, unit_cost, total_value)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [businessId, line.productId, voucherId, postingDate, qty, unitCost, total]
+    );
+  }
+
+  await insertAuditLog(client, {
+    businessId,
+    actorId,
+    action: 'PURCHASE_INVENTORY_APPLIED',
+    entityType: 'voucher',
+    entityId: voucherId,
+    metadata: {
+      lines: normalizedInventoryLines.map((l) => ({
+        productId: l.productId,
+        quantity: l.quantity,
+        unitCost: l.unitCost,
+        taxAmount: l.taxAmount || 0
+      }))
+    }
+  });
+}
+
 async function insertVoucherLines(client, voucherId, lines) {
   await client.query(`DELETE FROM voucher_lines WHERE voucher_id = $1`, [voucherId]);
 
@@ -294,8 +880,9 @@ async function postDraftInternal(client, voucherId, actorId, forcedVoucherNumber
 
 export async function createVoucher(payload) {
   return withTransaction(async (client) => {
-    ensureLines(payload.entries);
-    await assertAccountsBelongToBusiness(client, payload.businessId, payload.entries);
+    const effectiveEntries = await buildPurchaseDerivedEntries(client, payload);
+    ensureLines(effectiveEntries);
+    await assertAccountsBelongToBusiness(client, payload.businessId, effectiveEntries);
     const voucherDate = normalizeIsoDate(payload.voucherDate, 'voucherDate');
 
     const mode = payload.mode === 'DRAFT' ? 'DRAFT' : 'POST';
@@ -315,7 +902,7 @@ export async function createVoucher(payload) {
     );
 
     const voucherId = voucherRes.rows[0].id;
-    await insertVoucherLines(client, voucherId, payload.entries);
+    await insertVoucherLines(client, voucherId, effectiveEntries);
 
     await insertAuditLog(client, {
       businessId: payload.businessId,
@@ -329,7 +916,7 @@ export async function createVoucher(payload) {
         voucherDate,
         narration: payload.narration,
         mode,
-        totals: computeTotals(payload.entries)
+        totals: computeTotals(effectiveEntries)
       }
     });
 
@@ -338,6 +925,47 @@ export async function createVoucher(payload) {
     }
 
     const posted = await postDraftInternal(client, voucherId, payload.actorId, voucherNumber);
+
+    if (payload.voucherType === 'SALES' && Array.isArray(payload.inventoryLines) && payload.inventoryLines.length > 0) {
+      await applySalesInventoryIntegration(client, {
+        businessId: payload.businessId,
+        voucherId,
+        transactionId: posted.transactionId,
+        voucherDate,
+        inventoryLines: payload.inventoryLines,
+        actorId: payload.actorId
+      });
+    }
+    if (
+      payload.voucherType === 'PURCHASE' &&
+      ((Array.isArray(payload.inventoryLines) && payload.inventoryLines.length > 0) ||
+        (Array.isArray(payload.purchaseLines) && payload.purchaseLines.length > 0))
+    ) {
+      await applyPurchaseInventoryIntegration(client, {
+        businessId: payload.businessId,
+        voucherId,
+        voucherDate,
+        inventoryLines: payload.inventoryLines,
+        purchaseLines: payload.purchaseLines,
+        actorId: payload.actorId
+      });
+    }
+
+    await upsertOutstandingForInvoice(client, {
+      businessId: payload.businessId,
+      voucherId,
+      voucherType: payload.voucherType,
+      voucherDate,
+      lines: effectiveEntries
+    });
+    await applyAllocations(client, {
+      businessId: payload.businessId,
+      sourceVoucherId: voucherId,
+      sourceVoucherType: payload.voucherType,
+      allocations: payload.allocations,
+      allocationDate: voucherDate
+    });
+
     return { id: voucherId, status: 'POSTED', ...posted };
   });
 }
@@ -453,46 +1081,112 @@ export async function getVoucherById(voucherId, businessId) {
 
 export async function postVoucher(voucherId, payload) {
   return withTransaction(async (client) => {
-    if (Array.isArray(payload.entries) && payload.entries.length > 0) {
-      ensureLines(payload.entries);
-      await assertAccountsBelongToBusiness(client, payload.businessId, payload.entries);
+    const draftRes = await client.query(
+      `SELECT id, status, voucher_type AS "voucherType", voucher_date AS "voucherDate"
+       FROM vouchers
+       WHERE id = $1 AND business_id = $2
+       FOR UPDATE`,
+      [voucherId, payload.businessId]
+    );
 
-      const draftRes = await client.query(
-        `SELECT id, status
-         FROM vouchers
-         WHERE id = $1 AND business_id = $2
-         FOR UPDATE`,
-        [voucherId, payload.businessId]
-      );
+    if (draftRes.rows.length === 0) {
+      throw httpError(404, 'Voucher not found');
+    }
 
-      if (draftRes.rows.length === 0) {
-        throw httpError(404, 'Voucher not found');
-      }
+    const draft = draftRes.rows[0];
+    if (draft.status !== 'DRAFT') {
+      throw httpError(409, 'Only draft vouchers can be modified before posting');
+    }
 
-      if (draftRes.rows[0].status !== 'DRAFT') {
-        throw httpError(409, 'Only draft vouchers can be modified before posting');
-      }
+    const resolvedVoucherType = payload.voucherType || draft.voucherType;
+    const resolvedVoucherDate = payload.voucherDate
+      ? normalizeIsoDate(payload.voucherDate, 'voucherDate')
+      : normalizeIsoDate(draft.voucherDate, 'voucherDate');
 
-      await client.query(
-        `UPDATE vouchers
-         SET voucher_type = COALESCE($1::voucher_type, voucher_type),
-             voucher_number = COALESCE($2, voucher_number),
-             voucher_date = COALESCE($3::date, voucher_date),
-             narration = COALESCE($4, narration)
-         WHERE id = $5`,
-        [
-          payload.voucherType || null,
-          payload.voucherNumber || null,
-          payload.voucherDate ? normalizeIsoDate(payload.voucherDate, 'voucherDate') : null,
-          payload.narration || null,
-          voucherId
-        ]
-      );
+    let effectiveEntries = Array.isArray(payload.entries) && payload.entries.length > 0 ? payload.entries : null;
+    if (
+      !effectiveEntries &&
+      resolvedVoucherType === 'PURCHASE' &&
+      Array.isArray(payload.purchaseLines) &&
+      payload.purchaseLines.length > 0
+    ) {
+      effectiveEntries = await buildPurchaseDerivedEntries(client, {
+        ...payload,
+        voucherType: resolvedVoucherType,
+        voucherDate: resolvedVoucherDate,
+        entries: []
+      });
+    }
 
-      await insertVoucherLines(client, voucherId, payload.entries);
+    if (effectiveEntries) {
+      ensureLines(effectiveEntries);
+      await assertAccountsBelongToBusiness(client, payload.businessId, effectiveEntries);
+    }
+
+    await client.query(
+      `UPDATE vouchers
+       SET voucher_type = COALESCE($1::voucher_type, voucher_type),
+           voucher_number = COALESCE($2, voucher_number),
+           voucher_date = COALESCE($3::date, voucher_date),
+           narration = COALESCE($4, narration)
+       WHERE id = $5`,
+      [
+        payload.voucherType || null,
+        payload.voucherNumber || null,
+        resolvedVoucherDate,
+        payload.narration || null,
+        voucherId
+      ]
+    );
+
+    if (effectiveEntries) {
+      await insertVoucherLines(client, voucherId, effectiveEntries);
     }
 
     const result = await postDraftInternal(client, voucherId, payload.actorId);
+
+    if (resolvedVoucherType === 'SALES' && Array.isArray(payload.inventoryLines) && payload.inventoryLines.length > 0) {
+      await applySalesInventoryIntegration(client, {
+        businessId: payload.businessId,
+        voucherId,
+        transactionId: result.transactionId,
+        voucherDate: resolvedVoucherDate,
+        inventoryLines: payload.inventoryLines,
+        actorId: payload.actorId
+      });
+    }
+
+    if (
+      resolvedVoucherType === 'PURCHASE' &&
+      ((Array.isArray(payload.inventoryLines) && payload.inventoryLines.length > 0) ||
+        (Array.isArray(payload.purchaseLines) && payload.purchaseLines.length > 0))
+    ) {
+      await applyPurchaseInventoryIntegration(client, {
+        businessId: payload.businessId,
+        voucherId,
+        voucherDate: resolvedVoucherDate,
+        inventoryLines: payload.inventoryLines,
+        purchaseLines: payload.purchaseLines,
+        actorId: payload.actorId
+      });
+    }
+
+    const finalLines = effectiveEntries || (await readVoucherLines(client, voucherId, result.transactionId));
+    await upsertOutstandingForInvoice(client, {
+      businessId: payload.businessId,
+      voucherId,
+      voucherType: resolvedVoucherType,
+      voucherDate: resolvedVoucherDate,
+      lines: finalLines
+    });
+    await applyAllocations(client, {
+      businessId: payload.businessId,
+      sourceVoucherId: voucherId,
+      sourceVoucherType: resolvedVoucherType,
+      allocations: payload.allocations,
+      allocationDate: resolvedVoucherDate
+    });
+
     return { id: voucherId, status: 'POSTED', ...result };
   });
 }

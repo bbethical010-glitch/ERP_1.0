@@ -55,7 +55,8 @@ export function getGatewaySections(canManageUsers) {
       items: [
         { id: 'rep-trial', label: 'Trial Balance', path: '/reports/trial-balance', hotkey: 'T', keywords: ['drilldown'] },
         { id: 'rep-profit', label: 'Profit & Loss', path: '/reports/profit-loss', hotkey: 'O', keywords: ['income', 'expense'] },
-        { id: 'rep-balance', label: 'Balance Sheet', path: '/reports/balance-sheet', hotkey: 'B', keywords: ['assets', 'liabilities'] }
+        { id: 'rep-balance', label: 'Balance Sheet', path: '/reports/balance-sheet', hotkey: 'B', keywords: ['assets', 'liabilities'] },
+        { id: 'rep-inventory', label: 'Stock Summary', path: '/inventory', hotkey: 'I', keywords: ['inventory', 'stock', 'items'] }
       ]
     }
   ];
@@ -67,6 +68,7 @@ const ROUTE_LABELS = new Map([
   ['/vouchers', 'Voucher Register'],
   ['/vouchers/new', 'Voucher Entry'],
   ['/daybook', 'Daybook'],
+  ['/inventory', 'Stock Summary'],
   ['/users', 'Users'],
   ['/change-password', 'Change Password'],
   ['/reports/trial-balance', 'Trial Balance'],

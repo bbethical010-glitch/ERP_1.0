@@ -13,16 +13,16 @@ const DEFAULT_LINE = {
 };
 
 const COMMON_GROUPS = [
-    'Capital Account',
-    'Current Assets',
-    'Current Liabilities',
-    'Fixed Assets',
-    'Investments',
-    'Loans (Liability)',
-    'Bank Accounts',
-    'Cash-in-Hand',
-    'Sundry Creditors',
-    'Sundry Debtors'
+    { code: 'EQ', label: 'Capital Account' },
+    { code: 'CA', label: 'Current Assets' },
+    { code: 'FA', label: 'Fixed Assets' },
+    { code: 'LI', label: 'Liabilities' },
+    { code: 'IN', label: 'Income' },
+    { code: 'EX', label: 'Expenses' },
+    { code: 'CA-BANK', label: 'Bank Accounts' },
+    { code: 'CA-CASH', label: 'Cash-in-Hand' },
+    { code: 'LI-AP', label: 'Sundry Creditors' },
+    { code: 'CA-AR', label: 'Sundry Debtors' }
 ];
 
 export function OpeningPositionForm() {
@@ -34,9 +34,9 @@ export function OpeningPositionForm() {
 
     // Grid State
     const [openingBalances, setOpeningBalances] = useState([
-        { ledgerName: 'Owner Capital', group: 'Capital Account', drCr: 'CR', amount: 0 },
-        { ledgerName: 'Cash', group: 'Cash-in-Hand', drCr: 'DR', amount: 0 },
-        { ledgerName: 'Bank A/c', group: 'Bank Accounts', drCr: 'DR', amount: 0 },
+        { ledgerName: 'Owner Capital', groupCode: 'EQ', drCr: 'CR', amount: 0 },
+        { ledgerName: 'Cash', groupCode: 'CA-CASH', drCr: 'DR', amount: 0 },
+        { ledgerName: 'Bank A/c', groupCode: 'CA-BANK', drCr: 'DR', amount: 0 },
         ...Array(12).fill(null).map(() => ({ ...DEFAULT_LINE }))
     ]);
 
@@ -50,17 +50,17 @@ export function OpeningPositionForm() {
         updated[index][field] = value;
 
         // Auto-switch Dr/Cr based on group commonly
-        if (field === 'group' && value) {
-            const crGroups = ['Capital Account', 'Current Liabilities', 'Loans (Liability)', 'Sundry Creditors'];
+        if (field === 'groupCode' && value) {
+            const crGroups = ['EQ', 'LI', 'LI-AP'];
             if (crGroups.includes(value)) {
                 updated[index]['drCr'] = 'CR';
             } else {
                 updated[index]['drCr'] = 'DR';
             }
-        }
+        } // Fix: Closed the if statement properly
 
-        setOpeningBalances(updated);
-    };
+        setOpeningBalances(updated); // Fix: Moved outside the if block to capture all field changes
+    }; // Fix: Closed the handleLineChange function properly
 
     const handleAddLine = () => {
         setOpeningBalances([...openingBalances, { ...DEFAULT_LINE }]);
@@ -78,7 +78,13 @@ export function OpeningPositionForm() {
         setIsSubmitting(true);
         setError(null);
         try {
-            const validBalances = openingBalances.filter(b => b.ledgerName.trim() && b.amount > 0 && b.group);
+            const validBalances = openingBalances.filter(b => b.ledgerName.trim() && b.amount > 0 && b.groupCode)
+                .map(b => ({
+                    ledgerName: b.ledgerName,
+                    groupCode: b.groupCode,
+                    drCr: b.drCr,
+                    amount: b.amount
+                }));
             const validItems = inventory.filter(i => i.name.trim() && i.initialQty > 0);
 
             await OpeningPositionService.submitOpeningPosition({
@@ -91,14 +97,15 @@ export function OpeningPositionForm() {
             });
 
             // Redirect to Gateway
+            setIsSubmitting(false);
             navigate('/gateway');
         } catch (err) {
-            setError(err.response?.data?.error || err.message || 'Failed to submit opening position');
+            setError(err.message || 'Failed to submit opening position');
             setIsSubmitting(false);
         }
     };
 
-    const canSubmit = totals.variance === 0 && (totals.sumAssets > 0 || totals.sumLiabilities > 0 || totals.ownerCapital > 0);
+    const canSubmit = totals.variance === 0;
 
     // Global Keybinds
     useEffect(() => {
@@ -226,13 +233,13 @@ export function OpeningPositionForm() {
                                         <td className="p-1 px-2 border-r border-[#f2f4f8]">
                                             <select
                                                 className="w-full focusable bg-transparent border-none outline-none text-sm"
-                                                value={line.group}
-                                                onChange={(e) => handleLineChange(idx, 'group', e.target.value)}
+                                                value={line.groupCode}
+                                                onChange={(e) => handleLineChange(idx, 'groupCode', e.target.value)}
                                                 onKeyDown={(e) => handleGridKeyDown(e, idx, 1)}
                                             >
                                                 <option value="" disabled>Select Group...</option>
                                                 {COMMON_GROUPS.map(g => (
-                                                    <option key={g} value={g}>{g}</option>
+                                                    <option key={g.code} value={g.code}>{g.label}</option>
                                                 ))}
                                             </select>
                                         </td>

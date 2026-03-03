@@ -14,6 +14,56 @@ import { httpError } from '../../utils/httpError.js';
 
 export const vouchersRouter = Router();
 
+const inventoryLineSchema = z.object({
+  productId: z.string().uuid(),
+  quantity: z.number().positive(),
+  unitCost: z.number().positive().optional(),
+  taxRate: z.number().nonnegative().optional(),
+  taxAmount: z.number().nonnegative().optional()
+});
+
+const purchaseLineSchema = z.object({
+  lineType: z.enum(['INVENTORY', 'FIXED_ASSET']).default('INVENTORY'),
+  productId: z.string().uuid().optional(),
+  quantity: z.number().positive().optional(),
+  unitCost: z.number().nonnegative(),
+  assetAccountId: z.string().uuid().optional(),
+  assetAccountName: z.string().min(1).optional(),
+  counterpartyAccountId: z.string().uuid().optional(),
+  taxRate: z.number().nonnegative().optional(),
+  taxAmount: z.number().nonnegative().optional()
+}).superRefine((line, ctx) => {
+  if (line.lineType === 'INVENTORY') {
+    if (!line.productId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['productId'],
+        message: 'Inventory purchase line requires productId'
+      });
+    }
+    if (line.quantity === undefined || Number(line.quantity) <= 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['quantity'],
+        message: 'Inventory purchase line requires positive quantity'
+      });
+    }
+  }
+
+  if (line.lineType === 'FIXED_ASSET' && !line.assetAccountId && !line.assetAccountName) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['assetAccountId'],
+      message: 'Fixed asset line requires assetAccountId or assetAccountName'
+    });
+  }
+});
+
+const allocationSchema = z.object({
+  targetVoucherId: z.string().uuid(),
+  amount: z.number().positive()
+});
+
 const voucherSchema = z.object({
   voucherType: z.enum(['JOURNAL', 'PAYMENT', 'RECEIPT', 'SALES', 'PURCHASE', 'CONTRA']),
   voucherNumber: z.string().min(1).optional(),
@@ -21,6 +71,15 @@ const voucherSchema = z.object({
   narration: z.string().optional(),
   mode: z.enum(['DRAFT', 'POST']).optional(),
   actorId: z.string().optional(),
+  inventoryLines: z
+    .array(inventoryLineSchema)
+    .optional(),
+  purchaseLines: z
+    .array(purchaseLineSchema)
+    .optional(),
+  allocations: z
+    .array(allocationSchema)
+    .optional(),
   entries: z
     .array(
       z.object({
@@ -30,6 +89,17 @@ const voucherSchema = z.object({
       })
     )
     .min(2)
+    .optional()
+}).superRefine((voucher, ctx) => {
+  const hasEntries = Array.isArray(voucher.entries) && voucher.entries.length >= 2;
+  const hasPurchaseLines = Array.isArray(voucher.purchaseLines) && voucher.purchaseLines.length > 0;
+  if (!hasEntries && !(voucher.voucherType === 'PURCHASE' && hasPurchaseLines)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['entries'],
+      message: 'Provide at least two entries, or for PURCHASE provide purchaseLines'
+    });
+  }
 });
 
 const reversalSchema = z.object({
@@ -45,6 +115,15 @@ const lifecycleSchema = z.object({
   voucherNumber: z.string().min(1).optional(),
   voucherDate: z.string().date().optional(),
   narration: z.string().optional(),
+  inventoryLines: z
+    .array(inventoryLineSchema)
+    .optional(),
+  purchaseLines: z
+    .array(purchaseLineSchema)
+    .optional(),
+  allocations: z
+    .array(allocationSchema)
+    .optional(),
   entries: z
     .array(
       z.object({

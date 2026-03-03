@@ -113,12 +113,30 @@ dashboardRouter.get('/summary', async (req, res, next) => {
          FROM accounts a
          LEFT JOIN account_groups ag ON ag.id = a.account_group_id
          WHERE a.business_id = $1 AND ag.id IS NULL
+       ),
+       low_stock AS (
+         SELECT COUNT(*)::int AS count
+         FROM (
+           SELECT
+             p.id,
+             p.reorder_level,
+             COALESCE(SUM(it.quantity), 0) AS qty
+           FROM products p
+           LEFT JOIN inventory_transactions it
+             ON it.product_id = p.id
+            AND it.business_id = p.business_id
+            AND it.transaction_date <= $2::date
+           WHERE p.business_id = $1
+           GROUP BY p.id, p.reorder_level
+           HAVING COALESCE(SUM(it.quantity), 0) <= p.reorder_level
+         ) z
        )
        SELECT
          (SELECT count FROM draft_imbalance) AS unbalanced_drafts,
          (SELECT count FROM negative_cash) AS negative_cash_ledgers,
-         (SELECT count FROM missing_group) AS missing_ledger_mappings`,
-      [businessId]
+         (SELECT count FROM missing_group) AS missing_ledger_mappings,
+         (SELECT count FROM low_stock) AS low_stock_items`,
+      [businessId, asOf]
     );
 
     const recentRes = await pool.query(
@@ -147,6 +165,8 @@ dashboardRouter.get('/summary', async (req, res, next) => {
       kpis: {
         totalAssets: Number(kpi.assets || 0),
         totalLiabilities: Number(kpi.liabilities || 0),
+        // Surface equity explicitly as a separate KPI and keep a backward-compatible field.
+        totalEquity: Number(kpi.equity || 0),
         equity: Number(kpi.equity || 0),
         netProfitMtd: Number(kpi.net_profit_mtd || 0),
         netProfitYtd: Number(kpi.net_profit_ytd || 0),
@@ -157,7 +177,8 @@ dashboardRouter.get('/summary', async (req, res, next) => {
       alerts: {
         unbalancedDrafts: Number(alerts.unbalanced_drafts || 0),
         negativeCashLedgers: Number(alerts.negative_cash_ledgers || 0),
-        missingLedgerMappings: Number(alerts.missing_ledger_mappings || 0)
+        missingLedgerMappings: Number(alerts.missing_ledger_mappings || 0),
+        lowStockItems: Number(alerts.low_stock_items || 0)
       },
       recentVouchers: recentRes.rows.map((row) => ({
         ...row,

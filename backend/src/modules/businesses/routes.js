@@ -10,7 +10,9 @@ const patchSchema = z.object({
     name: z.string().min(2).max(120).optional(),
     address: z.string().max(500).optional(),
     financialYearStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-    baseCurrency: z.string().length(3).optional()
+    baseCurrency: z.string().length(3).optional(),
+    allowNegativeStock: z.boolean().optional(),
+    inventoryCostingMethod: z.enum(['WEIGHTED_AVERAGE', 'FIFO']).optional()
 });
 
 /**
@@ -28,6 +30,8 @@ businessesRouter.get('/me', requireAuth, async (req, res, next) => {
               base_currency AS "baseCurrency",
               address,
               financial_year_start AS "financialYearStart",
+              allow_negative_stock AS "allowNegativeStock",
+              inventory_costing_method AS "inventoryCostingMethod",
               created_at AS "createdAt"
        FROM businesses
        WHERE id = $1
@@ -95,6 +99,14 @@ businessesRouter.patch('/me', requireAuth, async (req, res, next) => {
             updates.push(`base_currency = $${idx++}`);
             values.push(payload.baseCurrency.toUpperCase());
         }
+        if (payload.allowNegativeStock !== undefined) {
+            updates.push(`allow_negative_stock = $${idx++}`);
+            values.push(payload.allowNegativeStock);
+        }
+        if (payload.inventoryCostingMethod !== undefined) {
+            updates.push(`inventory_costing_method = $${idx++}`);
+            values.push(payload.inventoryCostingMethod);
+        }
 
         if (updates.length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
@@ -110,7 +122,9 @@ businessesRouter.patch('/me', requireAuth, async (req, res, next) => {
                  name,
                  base_currency AS "baseCurrency",
                  address,
-                 financial_year_start AS "financialYearStart"`,
+                 financial_year_start AS "financialYearStart",
+                 allow_negative_stock AS "allowNegativeStock",
+                 inventory_costing_method AS "inventoryCostingMethod"`,
             values
         );
 

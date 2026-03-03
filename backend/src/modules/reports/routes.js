@@ -47,6 +47,7 @@ WITH account_balances AS (
 reportsRouter.get('/trial-balance', async (req, res, next) => {
   try {
     const { from, to } = req.query;
+    const hideZero = ['1', 'true', 'yes'].includes(String(req.query.hideZero || '').toLowerCase());
     const businessId = getBusinessId(req);
 
     const result = await pool.query(
@@ -58,11 +59,17 @@ reportsRouter.get('/trial-balance', async (req, res, next) => {
          group_id AS "groupId",
          group_name AS "groupName",
          category,
+         total_dr AS "drTotal",
+         total_cr AS "crTotal",
+         (total_dr - total_cr) AS "closingSigned",
+         CASE WHEN total_dr >= total_cr THEN 'DR' ELSE 'CR' END AS "closingType",
+         ABS(total_dr - total_cr) AS "closingBalance",
          CASE WHEN total_dr > total_cr THEN total_dr - total_cr ELSE 0 END AS debit,
          CASE WHEN total_cr > total_dr THEN total_cr - total_dr ELSE 0 END AS credit
        FROM account_balances
+       WHERE ($4::boolean = FALSE OR ABS(total_dr - total_cr) > 0.0001)
        ORDER BY category, group_name, code`,
-      [businessId, from || null, to || null]
+      [businessId, from || null, to || null, hideZero]
     );
 
     const totals = result.rows.reduce(
@@ -89,7 +96,8 @@ reportsRouter.get('/trial-balance', async (req, res, next) => {
       grouped,
       totals,
       isBalanced: Number(totals.debit.toFixed(2)) === Number(totals.credit.toFixed(2)),
-      difference: Number((totals.debit - totals.credit).toFixed(2))
+      difference: Number((totals.debit - totals.credit).toFixed(2)),
+      options: { hideZero }
     });
   } catch (error) {
     next(error);
@@ -105,9 +113,11 @@ reportsRouter.get('/profit-loss', async (req, res, next) => {
     const compareTo = req.query.compareTo || `${Number(to.slice(0, 4)) - 1}${to.slice(4)}`;
 
     const result = await pool.query(
-      `WITH period AS (
+      `WITH period_lines AS (
          SELECT
+           ag.code AS "groupCode",
            ag.category,
+           a.name AS "accountName",
            COALESCE(SUM(lp.debit), 0) AS debit,
            COALESCE(SUM(lp.credit), 0) AS credit
          FROM ledger_postings lp
@@ -116,9 +126,10 @@ reportsRouter.get('/profit-loss', async (req, res, next) => {
          WHERE lp.business_id = $1
            AND lp.posting_date BETWEEN $2::date AND $3::date
            AND ag.category IN ('INCOME', 'EXPENSE')
-         GROUP BY ag.category
+           AND a.name <> 'Year End Closing'
+         GROUP BY ag.code, ag.category, a.name
        ),
-       compare AS (
+       compare_lines AS (
          SELECT
            ag.category,
            COALESCE(SUM(lp.debit), 0) AS debit,
@@ -130,31 +141,48 @@ reportsRouter.get('/profit-loss', async (req, res, next) => {
            AND ($4::date IS NULL OR lp.posting_date >= $4::date)
            AND ($5::date IS NULL OR lp.posting_date <= $5::date)
            AND ag.category IN ('INCOME', 'EXPENSE')
+           AND a.name <> 'Year End Closing'
          GROUP BY ag.category
        )
        SELECT
-         COALESCE((SELECT SUM(credit - debit) FROM period WHERE category = 'INCOME'), 0) AS income,
-         COALESCE((SELECT SUM(debit - credit) FROM period WHERE category = 'EXPENSE'), 0) AS expense,
-         COALESCE((SELECT SUM(credit - debit) FROM compare WHERE category = 'INCOME'), 0) AS compare_income,
-         COALESCE((SELECT SUM(debit - credit) FROM compare WHERE category = 'EXPENSE'), 0) AS compare_expense`,
+         COALESCE((SELECT SUM(credit - debit) FROM period_lines WHERE category = 'INCOME'), 0) AS revenue,
+         COALESCE((
+           SELECT SUM(debit - credit)
+           FROM period_lines
+           WHERE category = 'EXPENSE'
+             AND ("groupCode" LIKE 'EX-IND%' OR LOWER("accountName") LIKE '%cost of goods sold%' OR LOWER("accountName") LIKE '%cogs%')
+         ), 0) AS direct_costs,
+         COALESCE((
+           SELECT SUM(debit - credit)
+           FROM period_lines
+           WHERE category = 'EXPENSE'
+             AND NOT ("groupCode" LIKE 'EX-IND%' OR LOWER("accountName") LIKE '%cost of goods sold%' OR LOWER("accountName") LIKE '%cogs%')
+         ), 0) AS operating_expenses,
+         COALESCE((SELECT SUM(credit - debit) FROM compare_lines WHERE category = 'INCOME'), 0) AS compare_income,
+         COALESCE((SELECT SUM(debit - credit) FROM compare_lines WHERE category = 'EXPENSE'), 0) AS compare_expense`,
       [businessId, from, to, compareFrom || null, compareTo || null]
     );
 
-    const income = Number(result.rows[0].income || 0);
-    const expense = Number(result.rows[0].expense || 0);
+    const revenue = Number(result.rows[0].revenue || 0);
+    const directCosts = Number(result.rows[0].direct_costs || 0);
+    const operatingExpenses = Number(result.rows[0].operating_expenses || 0);
     const compareIncome = Number(result.rows[0].compare_income || 0);
     const compareExpense = Number(result.rows[0].compare_expense || 0);
 
-    const grossProfit = income - expense;
-    const operatingProfit = grossProfit;
-    const netProfit = income - expense;
+    const grossProfit = revenue - directCosts;
+    const netProfit = grossProfit - operatingExpenses;
+    const totalExpense = directCosts + operatingExpenses;
 
     res.json({
-      income,
-      expense,
+      revenue,
+      directCosts,
       grossProfit,
-      operatingProfit,
+      operatingExpenses,
       netProfit,
+      // Backward-compatible fields
+      income: revenue,
+      expense: totalExpense,
+      operatingProfit: grossProfit,
       comparison: {
         income: compareIncome,
         expense: compareExpense,
@@ -175,20 +203,28 @@ reportsRouter.get('/balance-sheet', async (req, res, next) => {
       `${balanceCte}
        SELECT
          category,
-         COALESCE(SUM(
-           CASE WHEN category IN ('CURRENT_ASSET', 'FIXED_ASSET', 'EXPENSE') THEN total_dr - total_cr
-           ELSE total_cr - total_dr END
-         ), 0) AS category_balance
+         code,
+         name,
+         group_name AS "groupName",
+         (total_dr - total_cr) AS "closingSigned"
        FROM account_balances
-       GROUP BY category`,
+       ORDER BY category, group_name, code`,
       [businessId, from || null, to || null]
     );
 
-    const byCategory = Object.fromEntries(result.rows.map((row) => [row.category, Number(row.category_balance)]));
-
-    const assets = (byCategory.CURRENT_ASSET || 0) + (byCategory.FIXED_ASSET || 0);
-    const liabilities = byCategory.LIABILITY || 0;
-    const equityBase = byCategory.EQUITY || 0;
+    const assetsCurrent = result.rows
+      .filter((row) => row.category === 'CURRENT_ASSET')
+      .reduce((sum, row) => sum + Number(row.closingSigned || 0), 0);
+    const assetsNonCurrent = result.rows
+      .filter((row) => row.category === 'FIXED_ASSET')
+      .reduce((sum, row) => sum + Number(row.closingSigned || 0), 0);
+    const liabilities = result.rows
+      .filter((row) => row.category === 'LIABILITY')
+      .reduce((sum, row) => sum + Number((0 - Number(row.closingSigned || 0)).toFixed(2)), 0);
+    const equityBase = result.rows
+      .filter((row) => row.category === 'EQUITY')
+      .reduce((sum, row) => sum + Number((0 - Number(row.closingSigned || 0)).toFixed(2)), 0);
+    const assets = assetsCurrent + assetsNonCurrent;
 
     const pnl = await pool.query(
       `SELECT
@@ -208,12 +244,162 @@ reportsRouter.get('/balance-sheet', async (req, res, next) => {
     const liabilitiesAndEquity = liabilities + equity;
 
     res.json({
-      assets,
-      liabilities,
-      equity,
-      retainedEarnings,
-      liabilitiesAndEquity,
-      equationDifference: Number((assets - liabilitiesAndEquity).toFixed(2))
+      // Backward-compatible top-level numbers
+      assets: Number(assets.toFixed(2)),
+      liabilities: Number(liabilities.toFixed(2)),
+      equity: Number(equity.toFixed(2)),
+      retainedEarnings: Number(retainedEarnings.toFixed(2)),
+      liabilitiesAndEquity: Number(liabilitiesAndEquity.toFixed(2)),
+      equationDifference: Number((assets - liabilitiesAndEquity).toFixed(2)),
+      equationBalanced: Number((assets - liabilitiesAndEquity).toFixed(2)) === 0,
+      // New structured sections
+      assetsBreakdown: {
+        current: Number(assetsCurrent.toFixed(2)),
+        nonCurrent: Number(assetsNonCurrent.toFixed(2)),
+        total: Number(assets.toFixed(2))
+      },
+      liabilitiesBreakdown: {
+        total: Number(liabilities.toFixed(2))
+      },
+      equityBreakdown: {
+        capital: Number(equityBase.toFixed(2)),
+        retainedEarnings: Number(retainedEarnings.toFixed(2)),
+        total: Number(equity.toFixed(2))
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+reportsRouter.get('/aging', async (req, res, next) => {
+  try {
+    const businessId = getBusinessId(req);
+    const asOf = req.query.asOf || todayIso();
+
+    const result = await pool.query(
+      `WITH aging_base AS (
+         SELECT
+           voucher_type AS "voucherType",
+           outstanding_amount AS amount,
+           GREATEST(0, ($2::date - COALESCE(due_date, voucher_date)))::int AS age_days
+         FROM voucher_outstandings
+         WHERE business_id = $1
+           AND status = 'OPEN'
+           AND outstanding_amount > 0
+           AND voucher_date <= $2::date
+       )
+       SELECT
+         "voucherType",
+         COALESCE(SUM(CASE WHEN age_days <= 30 THEN amount ELSE 0 END), 0) AS bucket_0_30,
+         COALESCE(SUM(CASE WHEN age_days > 30 AND age_days <= 60 THEN amount ELSE 0 END), 0) AS bucket_30_60,
+         COALESCE(SUM(CASE WHEN age_days > 60 AND age_days <= 90 THEN amount ELSE 0 END), 0) AS bucket_60_90,
+         COALESCE(SUM(CASE WHEN age_days > 90 THEN amount ELSE 0 END), 0) AS bucket_90_plus,
+         COALESCE(SUM(amount), 0) AS total
+       FROM aging_base
+       GROUP BY "voucherType"`,
+      [businessId, asOf]
+    );
+
+    const rows = Object.fromEntries(result.rows.map((row) => [row.voucherType, row]));
+    const debtors = rows.SALES || {};
+    const creditors = rows.PURCHASE || {};
+
+    const shape = (row) => ({
+      bucket0to30: Number(row.bucket_0_30 || 0),
+      bucket30to60: Number(row.bucket_30_60 || 0),
+      bucket60to90: Number(row.bucket_60_90 || 0),
+      bucket90Plus: Number(row.bucket_90_plus || 0),
+      total: Number(row.total || 0)
+    });
+
+    res.json({
+      asOf,
+      debtors: shape(debtors),
+      creditors: shape(creditors)
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+reportsRouter.get('/outstanding-bills', async (req, res, next) => {
+  try {
+    const businessId = getBusinessId(req);
+    const type = req.query.type ? String(req.query.type).toUpperCase() : null;
+    const status = req.query.status ? String(req.query.status).toUpperCase() : null;
+    const asOf = req.query.asOf || todayIso();
+
+    if (type && !['SALES', 'PURCHASE'].includes(type)) {
+      throw httpError(400, 'type must be SALES or PURCHASE');
+    }
+    if (status && !['OPEN', 'CLOSED'].includes(status)) {
+      throw httpError(400, 'status must be OPEN or CLOSED');
+    }
+
+    const rows = await pool.query(
+      `SELECT
+         vo.id,
+         vo.voucher_id AS "voucherId",
+         vo.voucher_type AS "voucherType",
+         vo.voucher_date AS "voucherDate",
+         vo.due_date AS "dueDate",
+         vo.original_amount AS "originalAmount",
+         vo.outstanding_amount AS "outstandingAmount",
+         vo.status,
+         v.voucher_number AS "voucherNumber",
+         v.narration,
+         pa.id AS "partyAccountId",
+         pa.name AS "partyAccountName",
+         COALESCE(SUM(va.amount), 0) AS "allocatedAmount",
+         GREATEST(0, ($4::date - COALESCE(vo.due_date, vo.voucher_date)))::int AS "ageDays"
+       FROM voucher_outstandings vo
+       LEFT JOIN vouchers v ON v.id = vo.voucher_id
+       LEFT JOIN accounts pa ON pa.id = vo.party_account_id
+       LEFT JOIN voucher_allocations va
+         ON va.business_id = vo.business_id
+        AND va.target_voucher_id = vo.voucher_id
+       WHERE vo.business_id = $1
+         AND ($2::text IS NULL OR vo.voucher_type = $2::voucher_type)
+         AND ($3::text IS NULL OR vo.status = $3)
+       GROUP BY
+         vo.id, vo.voucher_id, vo.voucher_type, vo.voucher_date, vo.due_date,
+         vo.original_amount, vo.outstanding_amount, vo.status,
+         v.voucher_number, v.narration, pa.id, pa.name
+       ORDER BY vo.voucher_date DESC, v.voucher_number DESC NULLS LAST`,
+      [businessId, type, status, asOf]
+    );
+
+    const items = rows.rows.map((row) => ({
+      ...row,
+      originalAmount: Number(row.originalAmount || 0),
+      outstandingAmount: Number(row.outstandingAmount || 0),
+      allocatedAmount: Number(row.allocatedAmount || 0),
+      ageDays: Number(row.ageDays || 0)
+    }));
+
+    const totals = items.reduce(
+      (acc, item) => {
+        if (item.voucherType === 'SALES') {
+          acc.debtors += item.outstandingAmount;
+        } else if (item.voucherType === 'PURCHASE') {
+          acc.creditors += item.outstandingAmount;
+        }
+        acc.totalOutstanding += item.outstandingAmount;
+        return acc;
+      },
+      { debtors: 0, creditors: 0, totalOutstanding: 0 }
+    );
+
+    res.json({
+      asOf,
+      filters: { type, status },
+      totals: {
+        debtors: Number(totals.debtors.toFixed(2)),
+        creditors: Number(totals.creditors.toFixed(2)),
+        totalOutstanding: Number(totals.totalOutstanding.toFixed(2))
+      },
+      items
     });
   } catch (error) {
     next(error);

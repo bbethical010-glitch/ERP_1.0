@@ -50,6 +50,7 @@ export function GatewayMenu() {
     '/reports/trial-balance': SCREENS.TRIAL_BALANCE,
     '/reports/profit-loss': SCREENS.PROFIT_LOSS,
     '/reports/balance-sheet': SCREENS.BALANCE_SHEET,
+    '/inventory': SCREENS.INVENTORY_SUMMARY,
     '/users': SCREENS.USERS,
     '/change-password': SCREENS.CHANGE_PASSWORD,
     '/company-setup': SCREENS.COMPANY_SETUP,

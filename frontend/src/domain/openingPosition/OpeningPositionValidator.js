@@ -13,41 +13,49 @@ export const OpeningPositionValidator = {
         return stockItemSchema.safeParse(item);
     },
 
-    calculateTotals(openingBalances, inventory) {
+    calculateTotals(openingBalances = [], inventory = []) {
         let sumAssets = 0;
         let sumLiabilities = 0;
         let ownerCapital = 0;
 
         openingBalances.forEach(line => {
+            if (!line.groupCode) return;
+
             const amount = parseFloat(line.amount) || 0;
-            if (line.drCr === 'DR') {
-                sumAssets += amount;
-            } else if (line.drCr === 'CR') {
-                if (line.group.toLowerCase().includes('capital') || line.group.toLowerCase().includes('equity')) {
-                    ownerCapital += amount;
-                } else {
-                    sumLiabilities += amount;
-                }
+
+            // ASSETS
+            if (line.groupCode.startsWith('CA') || line.groupCode === 'FA') {
+                sumAssets += line.drCr === 'DR' ? amount : -amount;
+            }
+
+            // LIABILITIES
+            else if (line.groupCode === 'LI' || line.groupCode === 'LI-AP') {
+                sumLiabilities += line.drCr === 'CR' ? amount : -amount;
+            }
+
+            // CAPITAL / EQUITY
+            else if (line.groupCode === 'EQ') {
+                ownerCapital += line.drCr === 'CR' ? amount : -amount;
             }
         });
 
-        let totalInventory = 0;
-        inventory.forEach((item) => {
-            totalInventory += (parseFloat(item.initialQty) || 0) * (parseFloat(item.unitCost) || 0);
-        });
+        const totalInventory = inventory.reduce((sum, item) => {
+            return sum + (parseFloat(item.initialQty) || 0) * (parseFloat(item.unitCost) || 0);
+        }, 0);
 
-        // Add inventory to total assets visually
-        sumAssets += totalInventory;
+        const totalAssets = sumAssets + totalInventory;
 
-        // Assets = Liabilities + Capital
-        const variance = Math.abs(sumAssets - (sumLiabilities + ownerCapital)) < 0.01 ? 0 : sumAssets - (sumLiabilities + ownerCapital);
+        const variance =
+            Math.abs(totalAssets - (sumLiabilities + ownerCapital)) < 0.01
+                ? 0
+                : totalAssets - (sumLiabilities + ownerCapital);
 
         return {
             totalInventory,
-            sumAssets,
+            sumAssets: totalAssets,
             sumLiabilities,
             ownerCapital,
             variance
         };
     }
-};
+}

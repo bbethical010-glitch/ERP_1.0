@@ -28,6 +28,8 @@ export function VoucherEntryForm({ voucherId, vtype }) {
   const [voucherDate, setVoucherDate] = useState(new Date().toISOString().slice(0, 10));
   const [narration, setNarration] = useState('');
   const [entries, setEntries] = useState([emptyLine, { ...emptyLine, entryType: 'CR' }]);
+  const [salesLines, setSalesLines] = useState([]);
+  const [purchaseLines, setPurchaseLines] = useState([]);
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [lineError, setLineError] = useState('');
   const [reversalNumber, setReversalNumber] = useState('');
@@ -77,6 +79,12 @@ export function VoucherEntryForm({ voucherId, vtype }) {
   const isCancelled = isEditMode && existingVoucher?.status === 'CANCELLED';
 
   const totals = useMemo(() => computeVoucherTotals(entries), [entries]);
+
+  const { data: stockSummary } = useQuery({
+    queryKey: ['inventory-summary-for-voucher', businessId, voucherDate],
+    enabled: Boolean(businessId) && (voucherType === 'SALES' || voucherType === 'PURCHASE'),
+    queryFn: () => api.get(`/inventory/summary?asOf=${voucherDate}`)
+  });
 
   // Phase N: Initialize GridEngine and FocusGraph
   useEffect(() => {
@@ -164,6 +172,23 @@ export function VoucherEntryForm({ voucherId, vtype }) {
 
   const createOrSaveDraft = useMutation({
     mutationFn: async (mode) => {
+      const inventoryLines =
+        voucherType === 'SALES'
+          ? salesLines
+              .filter((line) => line.productId && Number(line.quantity) > 0)
+              .map((line) => ({
+                productId: line.productId,
+                quantity: Number(line.quantity)
+              }))
+          : voucherType === 'PURCHASE'
+          ? purchaseLines
+              .filter((line) => line.productId && Number(line.quantity) > 0 && Number(line.unitCost) > 0)
+              .map((line) => ({
+                productId: line.productId,
+                quantity: Number(line.quantity),
+                unitCost: Number(line.unitCost)
+              }))
+          : undefined;
       const payload = {
         voucherType,
         voucherNumber: voucherNumber || undefined,
@@ -174,7 +199,8 @@ export function VoucherEntryForm({ voucherId, vtype }) {
           accountId: line.accountId,
           entryType: line.entryType,
           amount: Number(line.amount)
-        }))
+        })),
+        inventoryLines
       };
       return api.post('/vouchers', payload);
     },
@@ -203,7 +229,24 @@ export function VoucherEntryForm({ voucherId, vtype }) {
           accountId: line.accountId,
           entryType: line.entryType,
           amount: Number(line.amount)
-        }))
+        })),
+        inventoryLines:
+          voucherType === 'SALES'
+            ? salesLines
+                .filter((line) => line.productId && Number(line.quantity) > 0)
+                .map((line) => ({
+                  productId: line.productId,
+                  quantity: Number(line.quantity)
+                }))
+            : voucherType === 'PURCHASE'
+            ? purchaseLines
+                .filter((line) => line.productId && Number(line.quantity) > 0 && Number(line.unitCost) > 0)
+                .map((line) => ({
+                  productId: line.productId,
+                  quantity: Number(line.quantity),
+                  unitCost: Number(line.unitCost)
+                }))
+            : undefined
       }),
     onSuccess: () => {
       announceToScreenReader('Voucher posted successfully');
@@ -268,6 +311,30 @@ export function VoucherEntryForm({ voucherId, vtype }) {
   function addLine() {
     if (!canEdit) return;
     setEntries((prev) => [...prev, { ...emptyLine }]);
+  }
+
+  function addSalesLine() {
+    setSalesLines((prev) => [...prev, { productId: '', quantity: '', salePrice: '' }]);
+  }
+
+  function updateSalesLine(index, key, value) {
+    setSalesLines((prev) => prev.map((line, i) => (i === index ? { ...line, [key]: value } : line)));
+  }
+
+  function removeSalesLine(index) {
+    setSalesLines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function addPurchaseLine() {
+    setPurchaseLines((prev) => [...prev, { productId: '', quantity: '', unitCost: '' }]);
+  }
+
+  function updatePurchaseLine(index, key, value) {
+    setPurchaseLines((prev) => prev.map((line, i) => (i === index ? { ...line, [key]: value } : line)));
+  }
+
+  function removePurchaseLine(index) {
+    setPurchaseLines((prev) => prev.filter((_, i) => i !== index));
   }
 
   function saveDraft() {
@@ -482,6 +549,174 @@ export function VoucherEntryForm({ voucherId, vtype }) {
             })}
           </tbody>
         </table>
+
+        {voucherType === 'SALES' && (
+          <div className="p-3 border-t border-tally-panelBorder text-sm">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold">Items Sold (affects inventory)</span>
+              <button type="button" onClick={addSalesLine} className="focusable boxed px-2 py-1 text-xs">
+                + Add Item
+              </button>
+            </div>
+            <table className="w-full text-xs">
+              <thead className="bg-tally-tableHeader">
+                <tr>
+                  <th className="text-left px-2 py-1">Product</th>
+                  <th className="text-right px-2 py-1">Available Qty</th>
+                  <th className="text-right px-2 py-1">Qty Sold</th>
+                  <th className="text-right px-2 py-1">Sale Price (optional)</th>
+                  <th className="text-center px-2 py-1">X</th>
+                </tr>
+              </thead>
+              <tbody>
+                {salesLines.map((line, idx) => {
+                  const product = stockSummary?.items?.find((p) => p.productId === line.productId);
+                  return (
+                    <tr key={idx} className="border-b border-tally-panelBorder">
+                      <td className="px-2 py-1">
+                        <select
+                          className="focusable border border-tally-panelBorder bg-white w-full"
+                          value={line.productId}
+                          onChange={(e) => updateSalesLine(idx, 'productId', e.target.value)}
+                        >
+                          <option value="">Select item…</option>
+                          {(stockSummary?.items || []).map((item) => (
+                            <option key={item.productId} value={item.productId}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        {product ? Number(product.quantity).toFixed(2) : '—'}
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="focusable border border-tally-panelBorder bg-white w-full text-right"
+                          value={line.quantity}
+                          onChange={(e) => updateSalesLine(idx, 'quantity', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="focusable border border-tally-panelBorder bg-white w-full text-right"
+                          value={line.salePrice}
+                          onChange={(e) => updateSalesLine(idx, 'salePrice', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          className="focusable text-tally-warning font-bold"
+                          onClick={() => removeSalesLine(idx)}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {salesLines.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-2 text-xs opacity-70 text-center">
+                      No items added. Add at least one stock item to link this sale to inventory.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {voucherType === 'PURCHASE' && (
+          <div className="p-3 border-t border-tally-panelBorder text-sm">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="font-semibold">Items Purchased (adds to inventory)</span>
+              <button type="button" onClick={addPurchaseLine} className="focusable boxed px-2 py-1 text-xs">
+                + Add Item
+              </button>
+            </div>
+            <table className="w-full text-xs">
+              <thead className="bg-tally-tableHeader">
+                <tr>
+                  <th className="text-left px-2 py-1">Product</th>
+                  <th className="text-right px-2 py-1">Current Qty</th>
+                  <th className="text-right px-2 py-1">Qty Purchased</th>
+                  <th className="text-right px-2 py-1">Unit Cost</th>
+                  <th className="text-center px-2 py-1">X</th>
+                </tr>
+              </thead>
+              <tbody>
+                {purchaseLines.map((line, idx) => {
+                  const product = stockSummary?.items?.find((p) => p.productId === line.productId);
+                  return (
+                    <tr key={idx} className="border-b border-tally-panelBorder">
+                      <td className="px-2 py-1">
+                        <select
+                          className="focusable border border-tally-panelBorder bg-white w-full"
+                          value={line.productId}
+                          onChange={(e) => updatePurchaseLine(idx, 'productId', e.target.value)}
+                        >
+                          <option value="">Select item…</option>
+                          {(stockSummary?.items || []).map((item) => (
+                            <option key={item.productId} value={item.productId}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        {product ? Number(product.quantity).toFixed(2) : '—'}
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="focusable border border-tally-panelBorder bg-white w-full text-right"
+                          value={line.quantity}
+                          onChange={(e) => updatePurchaseLine(idx, 'quantity', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-2 py-1 text-right">
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          className="focusable border border-tally-panelBorder bg-white w-full text-right"
+                          value={line.unitCost}
+                          onChange={(e) => updatePurchaseLine(idx, 'unitCost', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          className="focusable text-tally-warning font-bold"
+                          onClick={() => removePurchaseLine(idx)}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {purchaseLines.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-2 py-2 text-xs opacity-70 text-center">
+                      No items added. Add at least one stock item to link this purchase to inventory.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="p-3 flex flex-wrap gap-2 text-sm items-center">
           <span className="text-xs">⌘/Ctrl+S Save/Post • ⌥A Add Line • ⌥L Ledger Search • ⌥1/2/3 Jump Fields</span>
